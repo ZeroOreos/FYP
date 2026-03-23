@@ -1,0 +1,28 @@
+references:
+  dataset :
+    @inproceedings{liu2015faceattributes,
+ 	author = {Ziwei Liu, Ping Luo, Xiaogang Wang, and Xiaoou Tang},
+ 	title = {Deep Learning Face Attributes in the Wild},
+ 	booktitle = {Proceedings of International Conference on Computer Vision (ICCV)},
+ 	month = December,
+ 	year = {2015} 
+  }
+
+  arcface:
+    @inproceedings{liu2015faceattributes,
+ 	author = {Ziwei Liu, Ping Luo, Xiaogang Wang, and Xiaoou Tang},
+ 	title = {Deep Learning Face Attributes in the Wild},
+ 	booktitle = {Proceedings of International Conference on Computer Vision (ICCV)},
+ 	month = December,
+ 	year = {2015} 
+  }
+
+  progress : 
+  	initially to aggresive lr on backbone; caused 00 acc for 10 ep
+	reduced lr to 1e-4; got 0.03 acc after 10 ep
+	added softmax and freezing, got 45 val acc after 12 ep and platued; train acc is 0.99
+
+  facenet:
+    Schroff, F., Kalenichenko, D., & Philbin, J. (2015).
+FaceNet: A unified embedding for face recognition and clustering.
+Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR), 815–823.

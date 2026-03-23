@@ -1,0 +1,109 @@
+# =============================================================================
+# BASE PREPROCESSING ROBUSTNESS — MINI IMPLEMENTATION GUIDE (MODEL-TARGETED)
+# =============================================================================
+# Purpose:
+# - Implement research-aligned corruption transforms for FR robustness eval
+# - No training, no label changes, identity preserved
+# - Compatible with shared pair system
+#
+# NOTE:
+# - WRITE THIS CONTRACT (interface + parameters used) ATOP EACH MODEL/MODIFIER CODE
+#
+# -----------------------------------------------------------------------------
+# GENERAL PROTOCOL (MANDATORY)
+# -----------------------------------------------------------------------------
+# Input:
+# - Images already face-aligned and cropped
+# - Dataset structure: id_xxx/image files (unchanged)
+#
+# Output:
+# - Same resolution and format as input
+# - Identity folders unchanged
+# - Deterministic given seed
+#
+# Pair compatibility:
+# - DO NOT regenerate pairs
+# - DO NOT rename or reorder images
+# - Only pixel content changes
+#
+# Severity:
+# - Exactly 5 discrete levels: 1..5 (higher = stronger)
+# - Fixed parameters per level
+#
+# Randomness:
+# - Use provided RNG seed only
+# - Same input + seed → same output
+#
+# -----------------------------------------------------------------------------
+# REQUIRED MODIFIER INTERFACE
+# -----------------------------------------------------------------------------
+# name: str
+# severity_levels = [1,2,3,4,5]
+#
+# apply(image, severity: int, rng) -> image
+#
+# Optional:
+# parameter_table[severity] -> dict
+#
+# -----------------------------------------------------------------------------
+# CORE CORRUPTION SET (MATCH THESE PARAMS)
+# -----------------------------------------------------------------------------
+#
+# 1) RESOLUTION / RESAMPLING (downscale → upscale)
+# s1:0.90  s2:0.75  s3:0.50  s4:0.35  s5:0.20
+# interpolation: bilinear or bicubic
+#
+# 2) BLUR
+# 2A) Gaussian sigma: 0.5, 1, 2, 3, 4
+# 2B) Motion length(px): 3, 5, 9, 15, 21
+#     angle randomized via seeded RNG
+#
+# 3) JPEG COMPRESSION (quality)
+# 90, 70, 50, 30, 15
+#
+# 4) ILLUMINATION (apply ONE subtype)
+# Brightness factor: 0.85, 0.70, 0.55, 0.40, 0.25
+# Contrast factor:   0.90, 0.75, 0.60, 0.45, 0.30
+# Gamma:             0.8, 0.65, 0.5, 1.4, 1.8
+#
+# 5) GEOMETRIC MISALIGNMENT
+# Rotation degrees: ±3, ±6, ±9, ±12, ±15 (random sign via RNG)
+# Keep image size constant
+#
+# 6) OCCLUSION (apply ONE subtype)
+# Mask (lower-face coverage %): 30, 40, 50, 60, 70
+# Eye band height (% image):    10, 14, 18, 22, 26
+# Random block area (%):        5, 10, 15, 20, 25
+# Placement randomized via seed
+#
+# -----------------------------------------------------------------------------
+# IMPLEMENTATION CONSTRAINTS
+# -----------------------------------------------------------------------------
+# MUST NOT:
+# - Modify labels or identity structure
+# - Perform detection/alignment
+# - Train or fine-tune models
+# - Combine multiple corruption types unless requested
+#
+# SHOULD:
+# - Preserve identity recognizability
+# - Maintain visual plausibility
+# - Enable cross-dataset comparability
+#
+# -----------------------------------------------------------------------------
+# NAMING (RECOMMENDED)
+# -----------------------------------------------------------------------------
+# <base>_<modifier>_s<severity>
+# e.g., CelebA_ds_s3, CelebA_gblur_s2, CelebA_jpeg_s4, CelebA_mask_s3
+#
+# All variants MUST reuse base dataset pairs.
+#
+# -----------------------------------------------------------------------------
+# EVALUATION TARGET
+# -----------------------------------------------------------------------------
+# Designed for verification robustness metrics:
+# - TAR / FAR curves
+# - EER
+# - Clean vs degraded comparison
+# - Cross-model evaluation
+# =============================================================================

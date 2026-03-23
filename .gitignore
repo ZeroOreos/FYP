@@ -1,0 +1,12 @@
+Dataset/
+Results/
+*.jpg
+*.png
+*.jpeg
+*.bmp
+*.webp
+*.npz
+*.npy
+*.pth
+*.pt
+.DS_Store
