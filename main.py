@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, TypedDict
 
-from pathfinder import resolve_dataset_context
+from Utility.pathfinder import resolve_dataset_context
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from pathfinder import derive_pairs_output_path, resolve_dataset_context
+from Utility.pathfinder import derive_pairs_output_path, resolve_dataset_context
 
 
 VALID_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
