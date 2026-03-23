@@ -2,6 +2,7 @@ Dataset/CelebA/img_align_celeba
 Dataset/CelebA/main
 Dataset/CelebA/train
 Dataset/CelebA/val
+Dataset/CelebA/identity_CelebA.txt
 Results/
 !Results/compiled_results.csv
 *.jpg
