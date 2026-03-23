@@ -1,4 +1,3 @@
-
 import argparse
 import hashlib
 import itertools
@@ -9,41 +8,13 @@ from pathlib import Path
 
 import numpy as np
 
+from pathfinder import derive_pairs_output_path, resolve_dataset_context
 
 
 VALID_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 DEFAULT_SEED = 42
 DEFAULT_REPEATS = 1
 DEFAULT_FOLDS = 5
-
-
-
-def derive_pairs_output_path(dataset_dir: Path):
-    """
-    Create deterministic output path in Dataset/pairs/
-    based on dataset relative structure.
-
-    Example:
-        Dataset/CelebA/main -> Dataset/pairs/CelebA_main_pairs.npz
-    """
-
-    dataset_dir = dataset_dir.resolve()
-    parts = list(dataset_dir.parts)
-
-    if "Dataset" in parts:
-        idx = parts.index("Dataset")
-        relative_parts = parts[idx + 1 :]
-        dataset_root = Path(*parts[: idx + 1])
-    else:
-        relative_parts = parts[-2:]
-        dataset_root = dataset_dir.parent
-
-    name = "_".join(relative_parts)
-    filename = f"{name}_pairs.npz"
-
-    pairs_dir = dataset_root / "pairs"
-    return pairs_dir / filename
-
 
 
 def collect_identity_images(dataset_dir: Path):
@@ -150,7 +121,6 @@ def pairs_to_arrays(pairs):
     return img1_paths, img2_paths, labels
 
 
-
 def main():
     parser = argparse.ArgumentParser(
         description="Generate balanced face verification pairs."
@@ -181,12 +151,16 @@ def main():
     if not dataset_dir.exists():
         raise FileNotFoundError(dataset_dir)
 
+    context = resolve_dataset_context(dataset_dir)
+
     if args.pairs_out is None:
         pairs_out = derive_pairs_output_path(dataset_dir)
     else:
         pairs_out = Path(args.pairs_out).resolve()
 
     print(f"[INFO] Dataset: {dataset_dir}")
+    print(f"[INFO] Variant root: {context.variant_name}")
+    print(f"[INFO] Referenced base root: {context.base_root_name}")
     print(f"[INFO] Output:  {pairs_out}")
 
     identities = collect_identity_images(dataset_dir)
@@ -246,10 +220,19 @@ def main():
         repeat_ids=repeat_ids,
         fold_ids=fold_ids,
         dataset_hash=dataset_hash,
+        seed=args.seed,
+        num_repeats=args.repeats,
+        num_folds=args.folds,
     )
 
     metadata = {
         "dataset_dir": str(dataset_dir),
+        "variant_name": context.variant_name,
+        "base_dataset": context.base_dataset_name,
+        "referenced_base_root": context.base_root_name,
+        "variant_type": context.variant_type,
+        "transform_chain": context.transform_chain,
+        "num_transforms": context.num_transforms,
         "pairs_out": str(pairs_out),
         "dataset_hash": dataset_hash,
         "seed": args.seed,
