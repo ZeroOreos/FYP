@@ -8,7 +8,7 @@
 ## Top-Level Entry Points
 - `main_recognition.py`: current recognition / verification pipeline
 - `main_attack.py`: attack-verification pipeline
-- `modifier.py`: dataset materialization entry point
+- `modifier.py`: dataset materialization wrapper entry point
 
 ## Slowed Entry Points
 - `slowed/main_recognition_slowed.py`: throttled recognition / verification pipeline
@@ -19,35 +19,37 @@
 - Input: one dataset root
 - Flow: pairs -> embeddings -> verification metrics -> compiled results -> parsed tables
 - Reuse cached outputs when present
+- Model-specific scripts should generate embeddings only
+- Recognition evaluation should use one shared route via `Evaluators/verification.py`
 
 ## Attack Pipeline
 - Input: clean gallery root plus attack method configuration
 - Flow:
 - clean gallery embeddings
 - attack pair generation
-- attack image generation
+- attacked probe materialization via `modifier.py`
 - attacked probe embeddings
 - attack verification metrics
 - compiled results -> parsed tables
 - Every step should skip if its output already exists
-- Skip targets include embeddings, attack-pair files, generated attack datasets, manifests, metrics
+- Skip targets include embeddings, attack-pair files, generated attack datasets, metadata, metrics
 
 ## Layout
-- `modifier.py`: preprocessing dataset materialization
-- `attack_generate.py`: attack dataset generation from source-target pairs
+- `modifier.py`: wrapper CLI that dispatches to attack or non-attack materialization
 - `Modifiers/preprocessing/`: corruption / degradation builders
 - `Modifiers/protection/`: privacy / anti-recognition image-level methods
 - `Modifiers/attack/`: face-swap / reenactment method wrappers
 - `Utility/pathfinder.py`: dataset naming / base-root / chain resolution
+- `Utility/modify.py`: non-adversarial dataset materialization implementation
+- `Utility/attack.py`: adversarial dataset materialization implementation and attack metadata writer
 - `Utility/pipeline_common.py`: shared cached pairs / embeddings / metrics orchestration helpers
 - `Utility/attack_pipeline.py`: shared cached attack-pair / probe-build / attack-metrics orchestration helpers
 - `Utility/pairs.py`: clean pair generation helpers
 - `Utility/results_compile.py`: compiled / parsed result rebuild helpers
 - `Utility/results_parse.py`: readable result-table generation from `compiled_results.csv`
 - `Utility/attack_pair.py`: hard / semi-hard attack pair generation from embeddings
-- `Utility/attack_manifest.py`: attack manifest load / validate / resolve helpers
-- `Evaluators/verification.py`: clean / corruption / protection verification
-- `Evaluators/attack_verification.py`: impersonation / attack-success evaluation
+- `Evaluators/verification.py`: shared clean / corruption / protection verification evaluator
+- `Evaluators/attack_verification.py`: shared impersonation / attack-success evaluator
 - `Models/<Model>/generate.py`: dataset root -> embeddings
 
 ## Dataset
@@ -73,34 +75,48 @@
 - Folder name = claimed identity / victim identity
 - Output file name must retain the original source file name exactly
 - Original identity should not be inferred from the folder in attack roots
-- Original identity should be recovered from metadata and `identity_CelebA.txt` at the most efficient point in the pipeline
+- Original identity should be recovered from preserved filename plus dataset lookup / `identity_CelebA.txt` at the most efficient point in the pipeline
+- Filesystem semantics are the primary source of truth for attack datasets
+- Metadata JSON should only record information that is not safely inferable from structure and naming
+- Full per-sample manifests are not required by default
 
 ## Attack Metadata
-- Every attack root must include `attack_manifest.json` or `attack_manifest.csv`
-- Required fields:
-- `output_image`
-- `claimed_identity`
-- `victim_identity`
-- `attacker_identity`
-- `source_image`
-- `target_image`
-- `original_filename`
+- Every attack root must include a compact JSON metadata file written by `Utility/attack.py`
+- The JSON is a derivation record, not a full semantic restatement of every sample
+- Required dataset-level fields:
+- `input_dataset_dir`
+- `output_dataset_dir`
+- `base_dataset`
+- `referenced_base_root`
+- `variant_name`
 - `attack_family`
 - `attack_method`
 - `generator`
-- `base_root`
-- Optional fields:
-- `strength`
 - `seed`
-- `notes`
+- `pair_input`
+- `num_requested_pairs`
+- `num_written`
+- `num_failed`
+- `folder_identity_rule`
+- `filename_rule`
+- `attacker_resolution_rule`
+- `path_semantics_are_primary`
+- Optional fields:
+- generator parameters not already encoded in the variant token
+- notes about non-standard assumptions
+- failure records for samples that could not be generated
+- Per-sample records should be omitted unless they are necessary to explain failed or ambiguous cases
 
 ## Reproducibility Rule
 - Attack generators must be deterministic given method config, source-target pair, and seed
 - Attack generators must write all effective parameters to metadata
 - Attack generators must not silently rename files
 - Attack generators must not silently drop samples without logging
-- Attack generators must preserve one manifest row per generated output
-- If a sample fails, it must be recorded explicitly
+- If a sample fails, it must be recorded explicitly in metadata
+- Skip philosophy: if output + metadata already exist, compare metadata against the current execution request
+- If metadata matches, skip reuse is allowed
+- If metadata mismatches, stop and raise instead of silently reusing or overwriting
+- Do not add a separate reproducibility utility just for this check; perform the comparison inside the relevant materialization path
 
 ## Attack Pairing
 - `Utility/attack_pair.py` input: embeddings file or model result directory
@@ -117,42 +133,55 @@
 - Attack mode should treat gallery and probe separately
 - Gallery should usually be clean enrolled identities
 - Probe should usually be manipulated attack images
-- Future target CLI:
-- `python3 main_attack.py --gallery <gallery_root> --probe <probe_root> --model <model>`
+- Future-friendly CLI shape should separate gallery and probe concepts clearly, even if the immediate CLI remains simple
 
 ## Pairs
 - Pair source is derived from the referenced base root only
 - Pair path: `Dataset/pairs/<dataset_relative_base_root>_pairs.npz`
 - All variants ending in the same base suffix reuse the same pair file
 - Shared clean pairs remain valid for recognition mode
-- Attack mode must rely on attack manifests, not only clean pairs
+- Attack mode must rely on attack pair files plus compact attack metadata, not only clean pairs
 
 ## Modifier
 - `python3 modifier.py <dataset_dir> --step <modifier_spec> [--step ...] [--pair-input <atkpairs>]` -> derived variant root
 - Output root stays under the same dataset parent
-- Optional `--pair-input` restricts work to images referenced by attack-pair files
+- `modifier.py` is a wrapper entry point only
+- Non-adversarial steps dispatch to `Utility/modify.py`
+- Adversarial / pair-driven steps dispatch to `Utility/attack.py`
+- Optional `--pair-input` restricts work to referenced images or pairs, depending on mode
 - If derived root already exists, warn and skip unless `--force`
 - Reject exact duplicate transform tokens already present in the input chain
 - Reject duplicate transform tokens repeated within the same run
 - `transform.json` is written at `<variant_root>/transform.json`
-- `transform.json` stores ordered pipeline, params, seed, and paths
+- Non-adversarial variants use `transform.json` to store ordered pipeline, params, seed, and paths
+- Adversarial variants use a compact attack metadata JSON instead of a full per-sample manifest
 
 ## Models
 - `Models/<Model>/generate.py`: `<dataset_dir> <embeddings_out>` -> embeddings
 - Models remain embedding backbones
 - Models do not define attack success by themselves
 - Models must not generate their own pairs
+- Models should not own their own verification logic when they emit standard embeddings
 
 ## Evaluators
-- `Evaluators/verification.py`: `<pairs_file> <embeddings_file> <metrics_out>` -> verification metrics
-- `Evaluators/attack_verification.py`: `<gallery_embeddings> <probe_embeddings> <attack_manifest> <metrics_out>` -> attack metrics
-- Attack evaluation must report manifest rows requested, scored rows, and skipped rows
+- `Evaluators/verification.py`: `<pairs_file> <embeddings_file> <metrics_out>` -> verification metrics for all embedding backbones
+- `Evaluators/attack_verification.py`: `<gallery_embeddings> <probe_embeddings> <attack_metadata_json> <metrics_out>` -> attack metrics for all embedding backbones
+- Attack evaluation must report requested samples, scored samples, failed samples, and skipped samples
 - Attack metrics should include:
 - `attack_success_rate`
 - `victim_accept_rate`
 - `attacker_accept_rate`
 - `asr_at_far`
 - `delta_vs_clean`
+- `mean_clean_impostor_similarity`
+- `mean_clean_margin`
+- `mean_attack_delta_vs_clean`
+- `mean_margin_closure`
+- `mean_residual_margin`
+- `mean_source_preservation_score`
+- `source_preservation_accept_rate`
+- `constrained_attack_success_rate`
+- clean-margin-binned attack summaries
 
 ## Results
 - `Results/<variant_name>/<Model>/embeddings.npz`
@@ -165,15 +194,20 @@
 - `Results/parsed/clean_variant_deltas.csv`
 - `Results/parsed/transform_summary.csv`
 - `Results/parsed/metric_rankings.csv`
+- `Results/parsed/attack_results_long.csv`
+- `Results/parsed/attack_variant_overview.csv`
+- `Results/parsed/attack_tradeoff_summary.csv`
+- `Results/parsed/attack_margin_bins.csv`
+- `Results/parsed/attack_metric_rankings.csv`
 - Parsed tables should be the main human-readable outputs
 
-## Must Change
+## Design Rules
 - recognition / attack orchestration is split into `main_recognition.py` and `main_attack.py`
 - shared orchestration and result rebuild code should live in `Utility/`, not inside either main
 - slowed orchestration is split into `slowed/main_recognition_slowed.py` and `slowed/main_attack_slowed.py`
 - Attack evaluation must become a first-class pipeline, not a small add-on to recognition evaluation
-- Pair-only evaluation is insufficient for attack studies
-- Attack metadata must be first-class instead of implicit filename logic
+- Attack studies should report attack-specific thresholded and difficulty-aware metrics, not only balanced pairwise verification accuracy
+- Filesystem semantics should be primary for attack datasets; metadata should supplement only what cannot be safely inferred
 
 ## Keep
 - Existing embedding generators
@@ -181,6 +215,7 @@
 - Shared clean pair system
 - Preprocessing and protection modifiers
 - `transform.json`
+- Shared evaluator routes
 - compiled results + parsed readable outputs
 
 ## Remove or De-emphasize
@@ -191,6 +226,6 @@
 ## Invariants
 - Same referenced base root always maps to the same clean pair file
 - Results are isolated by variant and model
-- Attack roots must be reproducible through manifest + transform metadata
+- Attack roots must be reproducible through path semantics + compact attack metadata
 - No silent sample loss, silent renaming, or silent parameter drift
 - No training, fine-tuning, relabeling, or uncontrolled augmentation in the core benchmark unless explicitly added as a separate research branch

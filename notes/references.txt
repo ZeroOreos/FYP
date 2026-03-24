@@ -1,28 +1,74 @@
-references:
-  dataset :
-    @inproceedings{liu2015faceattributes,
- 	author = {Ziwei Liu, Ping Luo, Xiaogang Wang, and Xiaoou Tang},
- 	title = {Deep Learning Face Attributes in the Wild},
- 	booktitle = {Proceedings of International Conference on Computer Vision (ICCV)},
- 	month = December,
- 	year = {2015} 
-  }
+FYP references
 
-  arcface:
-    @inproceedings{liu2015faceattributes,
- 	author = {Ziwei Liu, Ping Luo, Xiaogang Wang, and Xiaoou Tang},
- 	title = {Deep Learning Face Attributes in the Wild},
- 	booktitle = {Proceedings of International Conference on Computer Vision (ICCV)},
- 	month = December,
- 	year = {2015} 
-  }
+Maintenance note:
+- Keep appending useful references here.
+- Prefer not to delete old entries; if something is outdated, duplicated, or wrong, mark it clearly instead.
+- When a reference is used in code, evaluation design, or writing, add a short "used for" note.
+- TODO for future me: keep updating these references as the attack-evaluation section evolves.
 
-  progress : 
-  	initially to aggresive lr on backbone; caused 00 acc for 10 ep
-	reduced lr to 1e-4; got 0.03 acc after 10 ep
-	added softmax and freezing, got 45 val acc after 12 ep and platued; train acc is 0.99
+Format:
+- [status] Citation / link
+  Used for: short note
+  Notes: short annotation
 
-  facenet:
-    Schroff, F., Kalenichenko, D., & Philbin, J. (2015).
-FaceNet: A unified embedding for face recognition and clustering.
-Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR), 815–823.
+Core verification / recognition
+
+- [active] Liu, Z., Luo, P., Wang, X., and Tang, X. (2015). Deep Learning Face Attributes in the Wild. ICCV.
+  Link: https://openaccess.thecvf.com/content_iccv_2015/html/Liu_Deep_Learning_Face_ICCV_2015_paper.html
+  Used for: CelebA dataset reference.
+  Notes: Keep because the project appears to use CelebA-derived identities/images.
+
+- [active] Schroff, F., Kalenichenko, D., and Philbin, J. (2015). FaceNet: A Unified Embedding for Face Recognition and Clustering. CVPR.
+  Link: https://openaccess.thecvf.com/content_cvpr_2015/html/Schroff_FaceNet_A_Unified_2015_CVPR_paper.html
+  Used for: FaceNet backbone reference and verification-embedding framing.
+  Notes: Good baseline citation when discussing embedding-space verification.
+
+- [active] Deng, J., Guo, J., Niannan, X., and Zafeiriou, S. (2019). ArcFace: Additive Angular Margin Loss for Deep Face Recognition. CVPR.
+  Link: https://openaccess.thecvf.com/content_CVPR_2019/html/Deng_ArcFace_Additive_Angular_Margin_Loss_for_Deep_Face_Recognition_CVPR_2019_paper.html
+  Used for: ArcFace-style recognition / verification backbone reference.
+  Notes: This should replace the old incorrect ArcFace placeholder that duplicated the CelebA citation.
+
+Attack evaluation / further reading
+
+- [active] Huang, Y. et al. (2025). AdvFaceGAN: a face dual-identity impersonation attack method based on generative adversarial networks. PeerJ Computer Science.
+  Link: https://pmc.ncbi.nlm.nih.gov/articles/PMC12192821/
+  Used for: motivating dual reporting of target success and source-identity preservation; useful for constrained ASR style thinking.
+  Notes: Strongly relevant to the "attack should still look like the source" discussion.
+
+- [active] Kessler, C. et al. (2024). Face morphing attack vulnerability / pair-selection analysis paper.
+  Link: https://pmc.ncbi.nlm.nih.gov/articles/PMC11142600/
+  Used for: supporting clean-pair difficulty stratification; useful evidence that embedding-based pair similarity changes attackability.
+  Notes: Helpful when justifying clean-margin bins and not relying on a single pooled ASR.
+
+- [active] Altuncu, D. et al. (2025). Advancing facial recognition security through adversarial attack research and standardization. Scientific Reports.
+  Link: https://www.nature.com/articles/s41598-025-15753-8
+  Used for: threshold-aware reporting language; useful when tying attack evaluation back to FAR/TAR style verification metrics.
+  Notes: Good bridge reference between attack work and verification evaluation practice.
+
+- [active] Wang, X., Wu, Y. C., Zhou, M., and Fu, H. F. (2024). Beyond surveillance: privacy, ethics, and regulations in face recognition technology. Frontiers in Big Data.
+  Link: https://www.frontiersin.org/journals/big-data/articles/10.3389/fdata.2024.1337465/full
+  Used for: broader context and framing; not central for metrics, but useful for motivation and discussion sections.
+  Notes: Keep as context rather than as a technical metric source.
+
+Presentation / interpretation notes from recent reading
+
+- [active] Useful presentation pattern from the papers above:
+  Used for: attack tables and parsed CSV design.
+  Notes: Present at least (1) headline ASR, (2) constrained ASR or source-preserving ASR, (3) clean difficulty summary, and (4) difficulty-stratified results. Avoid presenting only one pooled ASR number.
+
+- [active] Verification results are easiest to digest when tied back to the decision threshold.
+  Used for: mean clean margin, residual margin, FAR-conditioned ASR, and clean-margin bins.
+  Notes: This is a synthesis note from the attack + verification literature above, not a standalone citation.
+
+Legacy entries preserved from older notes
+
+- [legacy-keep] "arcface" entry in the previous version of this file duplicated the CelebA citation.
+  Used for: historical note only.
+  Notes: Keep this reminder so we do not accidentally cite the wrong paper again.
+
+- [legacy-keep] Progress note from previous file:
+  Used for: local experiment history.
+  Notes:
+  initially too aggressive lr on backbone; caused 0.0 acc for 10 ep
+  reduced lr to 1e-4; got 0.03 acc after 10 ep
+  added softmax and freezing, got 45 val acc after 12 ep and plateaued; train acc is 0.99

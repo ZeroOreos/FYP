@@ -217,6 +217,25 @@ def _flatten_bootstrap_ci(data: dict[str, Any]) -> dict[str, Any]:
     return fields
 
 
+def _flatten_attack_margin_bins(data: dict[str, Any]) -> dict[str, Any]:
+    bins = data.get("clean_margin_bins", {})
+    if not isinstance(bins, dict):
+        return {"clean_margin_bins_json": ""}
+
+    fields: dict[str, Any] = {
+        "clean_margin_bins_json": json.dumps(bins, separators=(",", ":")),
+    }
+    for bucket_name, bucket_data in bins.items():
+        if not isinstance(bucket_data, dict):
+            continue
+        prefix = f"clean_margin_{bucket_name}"
+        fields[f"{prefix}_count"] = bucket_data.get("count", "")
+        fields[f"{prefix}_attack_success_rate"] = bucket_data.get("attack_success_rate", "")
+        fields[f"{prefix}_mean_attack_delta_vs_clean"] = bucket_data.get("mean_attack_delta_vs_clean", "")
+        fields[f"{prefix}_mean_source_preservation_score"] = bucket_data.get("mean_source_preservation_score", "")
+    return fields
+
+
 def rebuild_compiled_csv() -> None:
     ensure_dir(RESULTS_ROOT)
 
@@ -250,6 +269,7 @@ def rebuild_compiled_csv() -> None:
         "num_embeddings",
         "embedding_dim",
         "num_pairs",
+        "num_attack_samples",
         "num_genuine_pairs",
         "num_impostor_pairs",
         "best_threshold",
@@ -279,6 +299,17 @@ def rebuild_compiled_csv() -> None:
         "attack_success_rate",
         "victim_accept_rate",
         "attacker_accept_rate",
+        "mean_clean_impostor_similarity",
+        "mean_clean_margin",
+        "num_preaccepted_clean_pairs",
+        "mean_attack_target_similarity",
+        "mean_attack_delta_vs_clean",
+        "mean_margin_closure",
+        "mean_residual_margin",
+        "mean_source_preservation_score",
+        "source_preservation_accept_rate",
+        "constrained_attack_success_rate",
+        "clean_margin_bins_json",
         "attack_success_rate_at_far_0p1",
         "attack_success_rate_at_far_0p01",
         "attack_success_rate_at_far_0p001",
@@ -301,6 +332,7 @@ def rebuild_compiled_csv() -> None:
         crossval_fields = _flatten_crossval(data)
         bootstrap_fields = _flatten_bootstrap_ci(data)
         tar_fields = _flatten_tar_at_far(metrics)
+        attack_margin_fields = _flatten_attack_margin_bins(data)
         extra_fieldnames.extend(
             [name for name in transform_fields if name not in base_fieldnames and name not in extra_fieldnames]
         )
@@ -313,6 +345,9 @@ def rebuild_compiled_csv() -> None:
         extra_fieldnames.extend(
             [name for name in bootstrap_fields if name not in base_fieldnames and name not in extra_fieldnames]
         )
+        extra_fieldnames.extend(
+            [name for name in attack_margin_fields if name not in base_fieldnames and name not in extra_fieldnames]
+        )
         extra_fieldnames.extend([name for name in tar_fields if name not in extra_fieldnames])
 
         row = {
@@ -323,12 +358,14 @@ def rebuild_compiled_csv() -> None:
             **repro_fields,
             **crossval_fields,
             **bootstrap_fields,
+            **attack_margin_fields,
             "model": data.get("model", path.parent.name),
             "pair_file": data.get("pair_file") or variant_meta["pair_file"],
             "embeddings_file": data.get("embeddings_file", ""),
             "num_embeddings": data.get("num_embeddings"),
             "embedding_dim": data.get("embedding_dim"),
             "num_pairs": data.get("num_pairs", metrics.get("num_pairs")),
+            "num_attack_samples": data.get("num_attack_samples", ""),
             "num_genuine_pairs": data.get("num_genuine_pairs", metrics.get("num_genuine_pairs")),
             "num_impostor_pairs": data.get("num_impostor_pairs", metrics.get("num_impostor_pairs")),
             "best_threshold": metrics.get("best_threshold", data.get("best_threshold")),
@@ -357,6 +394,16 @@ def rebuild_compiled_csv() -> None:
             "attack_success_rate": data.get("attack_success_rate", ""),
             "victim_accept_rate": data.get("victim_accept_rate", ""),
             "attacker_accept_rate": data.get("attacker_accept_rate", ""),
+            "mean_clean_impostor_similarity": data.get("mean_clean_impostor_similarity", ""),
+            "mean_clean_margin": data.get("mean_clean_margin", ""),
+            "num_preaccepted_clean_pairs": data.get("num_preaccepted_clean_pairs", ""),
+            "mean_attack_target_similarity": data.get("mean_attack_target_similarity", ""),
+            "mean_attack_delta_vs_clean": data.get("mean_attack_delta_vs_clean", ""),
+            "mean_margin_closure": data.get("mean_margin_closure", ""),
+            "mean_residual_margin": data.get("mean_residual_margin", ""),
+            "mean_source_preservation_score": data.get("mean_source_preservation_score", ""),
+            "source_preservation_accept_rate": data.get("source_preservation_accept_rate", ""),
+            "constrained_attack_success_rate": data.get("constrained_attack_success_rate", ""),
             "attack_success_rate_at_far_0p1": data.get("attack_success_rate_at_far_0p1", ""),
             "attack_success_rate_at_far_0p01": data.get("attack_success_rate_at_far_0p01", ""),
             "attack_success_rate_at_far_0p001": data.get("attack_success_rate_at_far_0p001", ""),
