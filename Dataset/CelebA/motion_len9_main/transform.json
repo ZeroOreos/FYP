@@ -1,0 +1,19 @@
+{
+  "input_dataset_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/CelebA/main",
+  "output_dataset_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/CelebA/motion_len9_main",
+  "base_dataset": "CelebA",
+  "referenced_base_root": "main",
+  "variant_name": "motion_len9_main",
+  "variant_type": "single",
+  "pipeline": [
+    {
+      "modifier": "motion_blur",
+      "token": "motion_len9",
+      "params": {
+        "severity": 3
+      }
+    }
+  ],
+  "seed": 42,
+  "num_workers": 4
+}

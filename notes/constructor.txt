@@ -6,6 +6,7 @@
 - Pairs: `Dataset/pairs/<dataset_relative_base_root>_pairs.npz`
 - `pairs.py`: `python3 pairs.py <dataset_dir>` -> pair file
 - `modifier.py`: `python3 modifier.py <dataset_dir> --step <modifier_spec> [--step ...]` -> derived variant root with preserved structure
+- `modifier.py`: rejects exact duplicate transform tokens already present in the input dataset chain
 - `main.py`: `python3 main.py <dataset_dir>` -> pairs, embeddings, metrics, compiled summary
 - `Models/<Model>/generate.py`: `<dataset_dir> <embeddings_out>` -> embeddings
 - `Models/<Model>/evaluate.py`: `<pairs_file> <embeddings_file> <metrics_out>` -> metrics

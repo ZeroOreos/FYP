@@ -1,0 +1,19 @@
+{
+  "input_dataset_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/CelebA/main",
+  "output_dataset_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/CelebA/illum_contrast0p75_main",
+  "base_dataset": "CelebA",
+  "referenced_base_root": "main",
+  "variant_name": "illum_contrast0p75_main",
+  "variant_type": "single",
+  "pipeline": [
+    {
+      "modifier": "contrast",
+      "token": "illum_contrast0p75",
+      "params": {
+        "severity": 2
+      }
+    }
+  ],
+  "seed": 42,
+  "num_workers": 4
+}

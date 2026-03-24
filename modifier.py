@@ -236,6 +236,36 @@ def derive_output_variant_name(dataset_dir: Path, steps: list[StepConfig]) -> st
     return f"{'__'.join(tokens)}_{context.base_root_name}"
 
 
+def existing_transform_tokens(dataset_dir: Path) -> list[str]:
+    context = resolve_dataset_context(dataset_dir)
+    if context.variant_name == context.base_root_name or context.transform_chain == "clean":
+        return []
+    return [token for token in context.transform_chain.split("__") if token]
+
+
+def validate_step_uniqueness(dataset_dir: Path, steps: list[StepConfig]) -> None:
+    existing = set(existing_transform_tokens(dataset_dir))
+    requested = [step.token for step in steps]
+    duplicate_existing = [token for token in requested if token in existing]
+    if duplicate_existing:
+        raise ValueError(
+            "requested transform already exists in dataset chain: "
+            + ", ".join(duplicate_existing)
+        )
+
+    seen: set[str] = set()
+    duplicate_requested: list[str] = []
+    for token in requested:
+        if token in seen and token not in duplicate_requested:
+            duplicate_requested.append(token)
+        seen.add(token)
+    if duplicate_requested:
+        raise ValueError(
+            "requested transform is duplicated in this run: "
+            + ", ".join(duplicate_requested)
+        )
+
+
 def derive_output_dataset_dir(dataset_dir: Path, steps: list[StepConfig]) -> Path:
     context = resolve_dataset_context(dataset_dir)
     output_variant_name = derive_output_variant_name(dataset_dir, steps)
@@ -419,6 +449,7 @@ def main() -> None:
     validate_input_dataset(dataset_dir)
 
     steps = [parse_step_spec(raw_step) for raw_step in args.step]
+    validate_step_uniqueness(dataset_dir, steps)
     output_dir = derive_output_dataset_dir(dataset_dir, steps)
 
     print(f"[INFO] input: {dataset_dir}")

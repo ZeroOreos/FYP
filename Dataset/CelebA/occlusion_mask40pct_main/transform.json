@@ -1,0 +1,19 @@
+{
+  "input_dataset_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/CelebA/main",
+  "output_dataset_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/CelebA/occlusion_mask40pct_main",
+  "base_dataset": "CelebA",
+  "referenced_base_root": "main",
+  "variant_name": "occlusion_mask40pct_main",
+  "variant_type": "single",
+  "pipeline": [
+    {
+      "modifier": "mask",
+      "token": "occlusion_mask40pct",
+      "params": {
+        "severity": 2
+      }
+    }
+  ],
+  "seed": 42,
+  "num_workers": 4
+}

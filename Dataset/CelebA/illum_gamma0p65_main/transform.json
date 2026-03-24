@@ -1,0 +1,19 @@
+{
+  "input_dataset_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/CelebA/main",
+  "output_dataset_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/CelebA/illum_gamma0p65_main",
+  "base_dataset": "CelebA",
+  "referenced_base_root": "main",
+  "variant_name": "illum_gamma0p65_main",
+  "variant_type": "single",
+  "pipeline": [
+    {
+      "modifier": "gamma",
+      "token": "illum_gamma0p65",
+      "params": {
+        "severity": 2
+      }
+    }
+  ],
+  "seed": 42,
+  "num_workers": 4
+}
