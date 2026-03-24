@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from Utility.attack import ATTACK_REGISTRY
 from Utility.modify import REGISTRY as MODIFY_REGISTRY
 
 
@@ -40,6 +41,13 @@ def is_modify_mode(steps: list[str], generator_script: str | None) -> bool:
     return True
 
 
+def validate_attack_steps(steps: list[str]) -> None:
+    for raw in steps:
+        name = raw.split(":", 1)[0].strip()
+        if name not in ATTACK_REGISTRY:
+            raise ValueError(f"unknown attack method '{name}'")
+
+
 def build_subcommand(args: argparse.Namespace) -> list[str]:
     script = MODIFY_SCRIPT if is_modify_mode(args.step, args.generator_script) else ATTACK_SCRIPT
     cmd = [sys.executable, str(script), str(Path(args.dataset_dir).resolve())]
@@ -57,6 +65,7 @@ def build_subcommand(args: argparse.Namespace) -> list[str]:
         if args.force:
             cmd.append("--force")
     else:
+        validate_attack_steps(args.step)
         if not args.pair_input:
             raise ValueError("attack materialization requires --pair-input")
         if not args.generator_script:

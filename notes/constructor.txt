@@ -128,6 +128,22 @@
 - `hard`: nearest non-match identities
 - `semi_hard`: sample from a high-similarity candidate pool
 
+## Attack Shortlist
+- Priority shortlist should cover the main attack families relevant to face verification:
+- Face swap:
+- `simswap`: practical high-fidelity face-swap baseline
+- `faceshifter`: stronger occlusion-aware face-swap baseline
+- Reenactment:
+- `fomm`: canonical lightweight reenactment baseline
+- `liveportrait`: stronger recent portrait-animation / reenactment baseline
+- Adversarial impersonation:
+- `advfacegan`: recent dual-identity impersonation model; especially relevant for source-preservation-aware evaluation
+- Morphing:
+- `mipgan`: representative GAN-based morphing baseline
+- `mordiff`: representative diffusion-based morphing baseline
+- These methods should be registered under `Modifiers/attack/`
+- Methods may still rely on external backends or generator scripts even when the registry entry exists
+
 ## Gallery / Probe
 - Recognition mode may still use one dataset root symmetrically
 - Attack mode should treat gallery and probe separately

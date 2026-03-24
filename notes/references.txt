@@ -30,15 +30,55 @@ Core verification / recognition
 
 Attack evaluation / further reading
 
+- [active] Chen, R. et al. (2021). SimSwap: An Efficient Framework For High Fidelity Face Swapping.
+  Link: https://arxiv.org/abs/2106.06340
+  Used for: constructor attack shortlist and `simswap` backend scaffold.
+  Notes: Strong practical face-swap baseline for verification impersonation studies. License: non-commercial / research-use oriented.
+
+- [active] Li, L. et al. (2020). FaceShifter: Towards High Fidelity And Occlusion Aware Face Swapping.
+  Link: https://lingzhili.com/FaceShifterPage/
+  Used for: constructor attack shortlist and `faceshifter` backend scaffold.
+  Notes: Useful stronger face-swap baseline next to SimSwap. License: check the exact codebase before vendoring.
+
+- [active] Siarohin, A. et al. (2019). First Order Motion Model for Image Animation.
+  Link: https://aliaksandrsiarohin.github.io/first-order-model-website/
+  Used for: constructor attack shortlist and `fomm` backend scaffold.
+  Notes: Canonical lightweight reenactment baseline. License: MIT.
+
+- [active] KwaiVGI (2024). LivePortrait.
+  Link: https://github.com/KwaiVGI/LivePortrait
+  Used for: constructor attack shortlist and `liveportrait` backend scaffold.
+  Notes: Recent practical portrait-animation / reenactment model. License: appears MIT.
+
 - [active] Huang, Y. et al. (2025). AdvFaceGAN: a face dual-identity impersonation attack method based on generative adversarial networks. PeerJ Computer Science.
   Link: https://pmc.ncbi.nlm.nih.gov/articles/PMC12192821/
-  Used for: motivating dual reporting of target success and source-identity preservation; useful for constrained ASR style thinking.
-  Notes: Strongly relevant to the "attack should still look like the source" discussion.
+  Used for: motivating dual reporting of target success and source-identity preservation; also used for constructor shortlist and `advfacegan` backend scaffold.
+  Notes: Strongly relevant to the "attack should still look like the source" discussion. License: verify before vendoring.
 
 - [active] Kessler, C. et al. (2024). Face morphing attack vulnerability / pair-selection analysis paper.
   Link: https://pmc.ncbi.nlm.nih.gov/articles/PMC11142600/
   Used for: supporting clean-pair difficulty stratification; useful evidence that embedding-based pair similarity changes attackability.
   Notes: Helpful when justifying clean-margin bins and not relying on a single pooled ASR.
+
+- [active] Venkatesh, S. et al. (2020). Worst-Case Morphs Using Wasserstein ALI and Improved MIPGAN.
+  Link: https://research.utwente.nl/en/publications/worst-case-morphs-using-wasserstein-ali-and-improved-mipgan-2
+  Used for: constructor attack shortlist and `mipgan` backend scaffold.
+  Notes: Representative GAN-based morphing attack line for biometric verification. License: code access appears controlled.
+
+- [active] Venkatesh, S. et al. (2024). MorDIFF: Recognition Vulnerability and Attack Detectability of Face Morphing Attacks Created by Diffusion Autoencoders.
+  Link: https://publica.fraunhofer.de/entities/publication/704bfa7d-dc16-43fa-b933-e054396b4321
+  Used for: constructor attack shortlist and `mordiff` backend scaffold.
+  Notes: Representative recent diffusion morphing attack line. License: often research-only / non-commercial.
+
+- [active] InsightFace / INSwapper licensing notes.
+  Link: https://github.com/deepinsight/insightface
+  Used for: SimSwap-adjacent workaround analysis and possible swap-backend alternatives.
+  Notes: InsightFace code is MIT, but released models are restricted.
+
+- [active] FaceSwap project licensing notes.
+  Link: https://github.com/deepfakes-models/faceswap-models
+  Used for: open-source alternative to SimSwap when a more clearly redistributable swap stack is preferred.
+  Notes: GPL-3.0.
 
 - [active] Altuncu, D. et al. (2025). Advancing facial recognition security through adversarial attack research and standardization. Scientific Reports.
   Link: https://www.nature.com/articles/s41598-025-15753-8

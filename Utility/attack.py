@@ -13,10 +13,27 @@ from typing import Any
 
 import numpy as np
 
+from Modifiers.attack.advfacegan import SPEC as ADVFACEGAN_SPEC
+from Modifiers.attack.faceshifter import SPEC as FACESHIFTER_SPEC
+from Modifiers.attack.fomm import SPEC as FOMM_SPEC
+from Modifiers.attack.liveportrait import SPEC as LIVEPORTRAIT_SPEC
+from Modifiers.attack.mipgan import SPEC as MIPGAN_SPEC
+from Modifiers.attack.mordiff import SPEC as MORDIFF_SPEC
+from Modifiers.attack.simswap import SPEC as SIMSWAP_SPEC
 from Utility.pathfinder import resolve_dataset_context
 
 
 METADATA_FILENAME = "attack_metadata.json"
+ATTACK_SPECS = (
+    SIMSWAP_SPEC,
+    FACESHIFTER_SPEC,
+    FOMM_SPEC,
+    LIVEPORTRAIT_SPEC,
+    ADVFACEGAN_SPEC,
+    MIPGAN_SPEC,
+    MORDIFF_SPEC,
+)
+ATTACK_REGISTRY = {spec["name"]: spec for spec in ATTACK_SPECS}
 
 
 @dataclass(frozen=True)
@@ -52,6 +69,8 @@ def parse_attack_step(raw: str) -> AttackStep:
     name = name.strip()
     if not name:
         raise ValueError("attack step name cannot be empty")
+    if name not in ATTACK_REGISTRY:
+        raise ValueError(f"unknown attack method '{name}'")
 
     params: dict[str, Any] = {}
     if raw_params.strip():
@@ -122,12 +141,7 @@ def expected_output_path(output_dir: Path, row: dict[str, str]) -> Path:
 
 
 def infer_attack_family(step_name: str) -> str:
-    lowered = step_name.lower()
-    if "reenact" in lowered or "fomm" in lowered:
-        return "reenactment"
-    if "swap" in lowered:
-        return "faceswap"
-    return "attack"
+    return ATTACK_REGISTRY[step_name].family
 
 
 def build_request_metadata(
@@ -147,6 +161,10 @@ def build_request_metadata(
         "variant_name": output_dir.name,
         "attack_family": infer_attack_family(step.name),
         "attack_method": step.name,
+        "attack_category": ATTACK_REGISTRY[step.name].category,
+        "paper_title": ATTACK_REGISTRY[step.name].paper_title,
+        "paper_url": ATTACK_REGISTRY[step.name].paper_url,
+        "code_url": ATTACK_REGISTRY[step.name].code_url,
         "generator": str(generator_script.resolve()),
         "seed": seed,
         "pair_input": str(pair_input.resolve()),
