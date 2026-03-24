@@ -98,6 +98,9 @@ def _transform_metadata_path(variant_meta: dict[str, Any]) -> Optional[Path]:
     candidate = DATASET_ROOT / base_dataset / variant_name / "transform.json"
     if candidate.exists():
         return candidate
+    attack_candidate = DATASET_ROOT / base_dataset / variant_name / "attack_metadata.json"
+    if attack_candidate.exists():
+        return attack_candidate
     return None
 
 
@@ -120,6 +123,23 @@ def _flatten_transform_metadata(transform_meta: dict[str, Any]) -> dict[str, Any
         }
 
     pipeline = transform_meta.get("pipeline", [])
+    if not pipeline:
+        metadata_file = ""
+        output_dir = transform_meta.get("output_dataset_dir", "")
+        if output_dir:
+            if transform_meta.get("attack_method"):
+                metadata_file = str(Path(output_dir) / "attack_metadata.json")
+            else:
+                metadata_file = str(Path(output_dir) / "transform.json")
+        return {
+            "transform_metadata_file": transform_meta.get("transform_metadata_file") or metadata_file,
+            "pipeline_summary": transform_meta.get("attack_method", ""),
+            "pipeline_json": "",
+            "latest_transform": transform_meta.get("attack_method", ""),
+            "oldest_transform": transform_meta.get("attack_method", ""),
+            "pipeline_seed": transform_meta.get("seed", ""),
+        }
+
     tokens = [step.get("token", "") for step in pipeline]
     flattened = {
         "transform_metadata_file": transform_meta.get("transform_metadata_file")

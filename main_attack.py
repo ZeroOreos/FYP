@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# python3 main_attack.py <gallery_dir> [attack options] -> cached attack pairing, probe generation, embeddings, attack metrics, parsed results
+# python3 main_attack.py <gallery_dir> [attack options] -> cached attack pairing, probe materialization, embeddings, attack metrics, parsed results
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
         "--attack-generator-script",
         type=str,
         default=None,
-        help="Optional generator script with contract: <gallery_dir> <atkpairs_npz> <probe_dir> <manifest_out>.",
+        help="Optional generator backend with contract: <gallery_dir> <atkpairs_npz> <probe_dir> <metadata_out>.",
     )
     parser.add_argument("--pair-model", type=str, default="InsightFace", help="Model used to generate attack pairs.")
     parser.add_argument("--top-k", type=int, default=5, help="Nearest non-match identities kept per victim.")
@@ -75,7 +75,13 @@ def main() -> None:
         raise ValueError("provide --probe-dir or --attack-method")
 
     generator_script = Path(args.attack_generator_script).resolve() if args.attack_generator_script else None
-    attack_manifest = maybe_run_attack_generate(gallery_dir, probe_dir, attack_pairs_npz, generator_script)
+    attack_metadata = maybe_run_attack_generate(
+        gallery_dir,
+        probe_dir,
+        attack_pairs_npz,
+        args.attack_method or probe_dir.name.rsplit("_", 1)[0],
+        generator_script,
+    )
     probe_context = resolve_dataset_context(probe_dir)
 
     for model in MODELS:
@@ -89,7 +95,7 @@ def main() -> None:
         maybe_run_attack_evaluate(
             gallery_embeddings=gallery_embeddings[model_name],
             probe_embeddings=probe_embeddings,
-            attack_manifest=attack_manifest,
+            attack_metadata=attack_metadata,
             metrics_out=attack_metrics_output(probe_context.variant_name, model_name),
             pairs_file=pairs_file,
         )

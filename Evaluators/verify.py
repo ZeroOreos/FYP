@@ -1,9 +1,8 @@
-# python3 evaluate.py <pairs_file> <embeddings_file> <metrics_out> [options] -> metrics.json; shared pairs only
+# python3 verify.py <pairs_file> <embeddings_file> <metrics_out> [options] -> metrics.json; shared pairs only
 
 import argparse
 import json
 import platform
-import sys
 import time
 from pathlib import Path
 
@@ -14,7 +13,7 @@ from tqdm import tqdm
 
 def load_pairs(pairs_file: Path):
     """
-    Expected minimum keys:
+    Required keys:
       - img1_paths
       - img2_paths
       - labels
@@ -71,28 +70,28 @@ def load_embeddings(embeddings_file: Path):
     data = np.load(embeddings_file, allow_pickle=True)
 
     embeddings = None
-    for k in ["embeddings", "embedding", "embs", "x", "features", "feats"]:
-        if k in data:
-            embeddings = np.asarray(data[k], dtype=np.float32)
+    for key in ["embeddings", "embedding", "embs", "x", "features", "feats"]:
+        if key in data.files:
+            embeddings = np.asarray(data[key], dtype=np.float32)
             break
 
     if embeddings is None:
-        raise KeyError(f"No embeddings key found. Keys: {list(data.keys())}")
+        raise KeyError(f"No embeddings key found. Keys: {list(data.files)}")
 
     image_paths = None
-    for k in ["image_paths", "paths", "img_paths", "filenames", "files"]:
-        if k in data:
-            image_paths = np.asarray(data[k]).astype(str)
+    for key in ["image_paths", "paths", "img_paths", "filenames", "files"]:
+        if key in data.files:
+            image_paths = np.asarray(data[key]).astype(str)
             break
 
     if image_paths is None:
         raise KeyError(
-            f"No image path key found in embeddings file. "
-            f"Expected one of: image_paths, paths, img_paths, filenames, files. "
-            f"Keys: {list(data.keys())}"
+            "No image path key found in embeddings file. "
+            "Expected one of: image_paths, paths, img_paths, filenames, files. "
+            f"Keys: {list(data.files)}"
         )
 
-    if len(image_paths) != len(embeddings):
+    if len(embeddings) != len(image_paths):
         raise ValueError(
             f"Embedding count ({len(embeddings)}) does not match image path count ({len(image_paths)})"
         )
@@ -101,12 +100,16 @@ def load_embeddings(embeddings_file: Path):
 
 
 
-def l2_normalize(embeddings: np.ndarray) -> np.ndarray:
-    norm = np.linalg.norm(embeddings, axis=1, keepdims=True)
-    return embeddings / np.clip(norm, 1e-12, None)
+def l2_normalize(x, axis=1, eps=1e-12):
+    norms = np.linalg.norm(x, axis=axis, keepdims=True)
+    return x / np.clip(norms, eps, None)
 
 
-def build_path_to_index(image_paths: np.ndarray):
+def cosine_similarity(a, b):
+    return np.sum(a * b, axis=1)
+
+
+def build_path_to_index(image_paths):
     path_to_index = {}
     duplicates = 0
 
@@ -150,6 +153,7 @@ def map_pairs_to_indices(img1_paths, img2_paths, path_to_index, strict_missing=T
     valid_mask = np.asarray(valid_mask, dtype=bool)
 
     dropped = int((~valid_mask).sum())
+
     if dropped > 0:
         msg = (
             f"{dropped} pair entries could not be matched to embeddings. "
@@ -162,6 +166,10 @@ def map_pairs_to_indices(img1_paths, img2_paths, path_to_index, strict_missing=T
 
     return idx1, idx2, valid_mask
 
+
+
+def safe_div(a, b):
+    return a / b if b != 0 else 0.0
 
 
 def confusion_from_threshold(scores: np.ndarray, y_true: np.ndarray, threshold: float):
@@ -177,14 +185,14 @@ def confusion_from_threshold(scores: np.ndarray, y_true: np.ndarray, threshold: 
 
 def metrics_from_confusion(tp, tn, fp, fn):
     total = tp + tn + fp + fn
-    acc = (tp + tn) / total if total > 0 else 0.0
-    far = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-    frr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
-    tar = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    tnr = tn / (tn + fp) if (tn + fp) > 0 else 0.0
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    acc = safe_div(tp + tn, total)
+    far = safe_div(fp, fp + tn)
+    frr = safe_div(fn, fn + tp)
+    tar = safe_div(tp, tp + fn)
+    tnr = safe_div(tn, tn + fp)
+    precision = safe_div(tp, tp + fp)
     recall = tar
-    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+    f1 = safe_div(2 * precision * recall, precision + recall)
 
     return {
         "accuracy": float(acc),
@@ -203,10 +211,6 @@ def metrics_from_confusion(tp, tn, fp, fn):
 
 
 def compute_curve(scores: np.ndarray, y_true: np.ndarray):
-    """
-    Returns thresholds and corresponding verification metrics.
-    Thresholds are unique score values, plus guard endpoints.
-    """
     scores = np.asarray(scores, dtype=np.float64)
     y_true = np.asarray(y_true, dtype=np.int32)
 
@@ -245,10 +249,6 @@ def compute_curve(scores: np.ndarray, y_true: np.ndarray):
 
 
 def compute_auc_from_curve(fars: np.ndarray, tars: np.ndarray):
-    """
-    ROC-AUC where x = FAR (FPR), y = TAR (TPR).
-    Sort x ascending before trapezoidal integration.
-    """
     order = np.argsort(fars)
     x = fars[order]
     y = tars[order]
@@ -277,9 +277,6 @@ def find_eer(thresholds, fars, frrs):
 
 
 def tar_at_far(thresholds, fars, tars, target_far: float):
-    """
-    Highest TAR among thresholds satisfying FAR <= target_far.
-    """
     valid = np.where(fars <= target_far)[0]
     if len(valid) == 0:
         return {
@@ -339,13 +336,49 @@ def evaluate_scores(scores: np.ndarray, y_true: np.ndarray, far_targets=(1e-1, 1
 
 
 
+def summarize_metric_dicts(rows):
+    metric_keys = [
+        "accuracy", "far", "frr", "tar", "precision", "recall", "f1",
+        "auc", "eer"
+    ]
+
+    summary = {}
+    for key in metric_keys:
+        vals = [r[key] for r in rows if key in r and r[key] is not None]
+        if len(vals) == 0:
+            summary[key] = {"mean": None, "std": None}
+            continue
+        vals = np.asarray(vals, dtype=np.float64)
+        summary[key] = {
+            "mean": float(np.mean(vals)),
+            "std": float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0,
+        }
+
+    tar_far_keys = set()
+    for r in rows:
+        if "tar_at_far" in r:
+            tar_far_keys.update(r["tar_at_far"].keys())
+
+    tar_far_summary = {}
+    for k in sorted(tar_far_keys):
+        vals = []
+        for r in rows:
+            if "tar_at_far" in r and k in r["tar_at_far"]:
+                vals.append(r["tar_at_far"][k]["tar"])
+        if len(vals) == 0:
+            tar_far_summary[k] = {"mean": None, "std": None}
+            continue
+        vals = np.asarray(vals, dtype=np.float64)
+        tar_far_summary[k] = {
+            "mean": float(np.mean(vals)),
+            "std": float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0,
+        }
+
+    summary["tar_at_far"] = tar_far_summary
+    return summary
+
+
 def evaluate_repeat_fold(scores, y_true, repeat_ids, fold_ids, far_targets):
-    """
-    For each repeat:
-      - for each fold, choose threshold on other folds within the same repeat
-      - test on held-out fold
-    Reports fold-wise and repeat-wise summaries.
-    """
     results = []
     unique_repeats = sorted(np.unique(repeat_ids).tolist())
 
@@ -420,10 +453,6 @@ def bootstrap_confidence_intervals(
     n_bootstrap: int = 1000,
     far_targets=(1e-1, 1e-2, 1e-3),
 ):
-    """
-    Simple bootstrap over pairs on the pooled evaluation.
-    Threshold is selected separately inside each bootstrap sample.
-    """
     rng = np.random.default_rng(seed)
     n = len(y_true)
 
@@ -466,7 +495,7 @@ def bootstrap_confidence_intervals(
             "ci95_high": float(np.percentile(arr, 97.5)),
         }
 
-    out = {
+    return {
         "n_bootstrap_valid": int(len(accs)),
         "best_accuracy": ci(accs),
         "auc": ci(aucs),
@@ -476,65 +505,18 @@ def bootstrap_confidence_intervals(
         "f1": ci(f1s),
         "tar_at_far": {k: ci(v) for k, v in tar_far_store.items()},
     }
-    return out
-
-
-
-def summarize_metric_dicts(rows):
-    """
-    Summarizes a list of metric dicts by mean/std for core scalar metrics.
-    """
-    metric_keys = [
-        "accuracy", "far", "frr", "tar", "precision", "recall", "f1",
-        "auc", "eer"
-    ]
-
-    summary = {}
-    for key in metric_keys:
-        vals = [r[key] for r in rows if key in r and r[key] is not None]
-        if len(vals) == 0:
-            summary[key] = {"mean": None, "std": None}
-            continue
-        vals = np.asarray(vals, dtype=np.float64)
-        summary[key] = {
-            "mean": float(np.mean(vals)),
-            "std": float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0,
-        }
-
-    tar_far_keys = set()
-    for r in rows:
-        if "tar_at_far" in r:
-            tar_far_keys.update(r["tar_at_far"].keys())
-
-    tar_far_summary = {}
-    for k in sorted(tar_far_keys):
-        vals = []
-        for r in rows:
-            if "tar_at_far" in r and k in r["tar_at_far"]:
-                vals.append(r["tar_at_far"][k]["tar"])
-        if len(vals) == 0:
-            tar_far_summary[k] = {"mean": None, "std": None}
-            continue
-        vals = np.asarray(vals, dtype=np.float64)
-        tar_far_summary[k] = {
-            "mean": float(np.mean(vals)),
-            "std": float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0,
-        }
-
-    summary["tar_at_far"] = tar_far_summary
-    return summary
 
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Evaluate FaceNet verification embeddings with reproducible metrics."
+        description="Evaluate InsightFace verification embeddings with reproducible metrics."
     )
     parser.add_argument("pairs_file", type=str, help="Shared pairs .npz")
     parser.add_argument("embeddings_file", type=str, help="Embeddings .npz")
     parser.add_argument("metrics_out", type=str, help="Output metrics .json")
-    parser.add_argument("--model-name", type=str, default="FaceNet")
-    parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap iterations for CI")
+    parser.add_argument("--model-name", type=str, default="InsightFace")
+    parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap iterations")
     parser.add_argument(
         "--far-targets",
         type=float,
@@ -572,14 +554,15 @@ def main():
     print(f"[INFO] Loaded pairs: {len(y_true)}")
 
     embeddings, image_paths = load_embeddings(embeddings_file)
+    embeddings = l2_normalize(embeddings, axis=1)
+
     print(f"[INFO] Loaded embeddings:  {embeddings.shape}")
     print(f"[INFO] Loaded image paths: {image_paths.shape}")
-
-    embeddings = l2_normalize(embeddings)
     print("[INFO] Applied L2 normalization")
 
     path_to_index = build_path_to_index(image_paths)
     original_pair_count = len(y_true)
+
     idx1, idx2, valid_mask = map_pairs_to_indices(
         img1_paths,
         img2_paths,
@@ -609,7 +592,9 @@ def main():
     print(f"[INFO] Repeats found:  {len(np.unique(repeat_ids))}")
     print(f"[INFO] Folds found:    {len(np.unique(fold_ids))}")
 
-    scores = np.sum(embeddings[idx1] * embeddings[idx2], axis=1)
+    emb_a = embeddings[idx1]
+    emb_b = embeddings[idx2]
+    scores = cosine_similarity(emb_a, emb_b)
 
     print(
         f"[INFO] Score range: min={scores.min():.6f}, "
@@ -643,7 +628,14 @@ def main():
 
     elapsed_sec = time.perf_counter() - t0
 
+    modification_type = ""
+    try:
+        modification_type = metrics_out.parent.parent.name
+    except Exception:
+        modification_type = ""
+
     metrics = {
+        "modification_type": modification_type,
         "model": args.model_name,
         "num_embeddings": int(len(embeddings)),
         "embedding_dim": int(embeddings.shape[1]) if embeddings.ndim == 2 else None,
@@ -660,6 +652,7 @@ def main():
             "num_folds": pair_meta["num_folds"],
             "python_version": platform.python_version(),
             "numpy_version": np.__version__,
+            "allow_missing_pairs": bool(args.allow_missing_pairs),
         },
         "pooled_metrics": pooled,
         "crossval": {
@@ -671,7 +664,8 @@ def main():
             "Thresholds are selected by accuracy on train folds unless otherwise changed.",
             "Bootstrap CIs are pair-level, not identity-level.",
             "AUC and EER are computed from observed score thresholds on this evaluation set.",
-            "This script evaluates one embedding model on one pair file; cross-model transfer should be run separately."
+            "This script evaluates one embedding model on one pair file; cross-model transfer should be run separately.",
+            "If --allow-missing-pairs is used, results depend on the filtered subset rather than the full intended protocol."
         ],
     }
 
@@ -679,9 +673,7 @@ def main():
     with open(metrics_out, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
 
-    print("=" * 68)
-    print("POOLED RESULTS")
-    print("=" * 68)
+    print("\n================ VERIFICATION RESULTS ================")
     print(f"Best threshold:     {pooled['best_threshold']:.6f}")
     print(f"Best accuracy:      {pooled['best_accuracy']:.6f}")
     print(f"FAR:                {pooled['far']:.6f}")
@@ -692,7 +684,7 @@ def main():
     print(f"F1 score:           {pooled['f1']:.6f}")
     print(f"AUC:                {pooled['auc']:.6f}")
     print(f"TP / TN / FP / FN:  {pooled['tp']} / {pooled['tn']} / {pooled['fp']} / {pooled['fn']}")
-    print("-" * 68)
+    print("------------------------------------------------------")
     print(f"EER:                {pooled['eer']:.6f}")
     print(f"EER threshold:      {pooled['eer_threshold']:.6f}")
     print(f"FAR at EER:         {pooled['far_at_eer']:.6f}")
@@ -705,9 +697,8 @@ def main():
         print(f"{k.upper():<19} TAR={tar:.6f}  FAR={actual_far if actual_far is not None else 'None'}  TH={th if th is not None else 'None'}")
 
     if cv_summary is not None:
-        print("=" * 68)
-        print("CROSS-VALIDATED SUMMARY (mean ± std over held-out folds)")
-        print("=" * 68)
+        print("------------------------------------------------------")
+        print("CV SUMMARY (mean ± std over held-out folds)")
         for k in ["accuracy", "auc", "eer", "far", "frr", "tar", "f1"]:
             if k in cv_summary and cv_summary[k]["mean"] is not None:
                 print(f"{k.upper():<10} {cv_summary[k]['mean']:.6f} ± {cv_summary[k]['std']:.6f}")
@@ -717,9 +708,8 @@ def main():
                 if v["mean"] is not None:
                     print(f"{k.upper():<19} {v['mean']:.6f} ± {v['std']:.6f}")
 
-    print("=" * 68)
+    print("------------------------------------------------------")
     print("BOOTSTRAP 95% CI (pooled)")
-    print("=" * 68)
     for k in ["best_accuracy", "auc", "eer", "far", "frr", "f1"]:
         v = bootstrap[k]
         if v["mean"] is not None:
@@ -728,8 +718,8 @@ def main():
                 f"95%CI=[{v['ci95_low']:.6f}, {v['ci95_high']:.6f}]"
             )
 
-    print("=" * 68)
-    print(f"[INFO] Saved metrics: {metrics_out}")
+    print("======================================================\n")
+    print(f"[INFO] Saved metrics to: {metrics_out}")
 
 
 if __name__ == "__main__":

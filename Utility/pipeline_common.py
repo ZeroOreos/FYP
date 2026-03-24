@@ -28,21 +28,19 @@ ALLOW_MISSING_PAIRS = True
 class ModelSpec(TypedDict):
     name: str
     generate_script: Path
-    evaluate_script: Path
 
 
 MODELS: list[ModelSpec] = [
     {
         "name": "InsightFace",
         "generate_script": PROJECT_ROOT / "Models" / "InsightFace" / "generate.py",
-        "evaluate_script": PROJECT_ROOT / "Models" / "InsightFace" / "evaluate.py",
     },
     {
         "name": "FaceNet",
         "generate_script": PROJECT_ROOT / "Models" / "FaceNet" / "generate.py",
-        "evaluate_script": PROJECT_ROOT / "Models" / "FaceNet" / "evaluate.py",
     },
 ]
+VERIFY_SCRIPT = PROJECT_ROOT / "Evaluators" / "verify.py"
 
 
 def ensure_dir(path: Path) -> None:
@@ -73,8 +71,8 @@ def validate_model_registry(models: list[ModelSpec]) -> None:
     for model in models:
         if not model["generate_script"].exists():
             raise FileNotFoundError(f"{model['name']} generate.py not found")
-        if not model["evaluate_script"].exists():
-            raise FileNotFoundError(f"{model['name']} evaluate.py not found")
+    if not VERIFY_SCRIPT.exists():
+        raise FileNotFoundError(f"Shared verify.py not found: {VERIFY_SCRIPT}")
 
 
 def pairs_output_path(dataset_dir: Path) -> Path:
@@ -140,7 +138,6 @@ def maybe_run_generate(
 
 def maybe_run_evaluate(variant_name: str, model: ModelSpec, pairs_file: Path, embeddings_file: Path) -> Path:
     model_name = model["name"]
-    script_path = model["evaluate_script"]
     out_path = metrics_output_path(variant_name, model_name)
 
     ensure_dir(out_path.parent)
@@ -151,10 +148,12 @@ def maybe_run_evaluate(variant_name: str, model: ModelSpec, pairs_file: Path, em
 
     cmd = [
         sys.executable,
-        str(script_path),
+        str(VERIFY_SCRIPT),
         str(pairs_file),
         str(embeddings_file),
         str(out_path),
+        "--model-name",
+        model_name,
     ]
 
     if ALLOW_MISSING_PAIRS:

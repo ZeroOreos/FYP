@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-# Backward-compatible wrapper around Evaluators/attack.py
+# Backward-compatible wrapper around Evaluators/verify.py
 
 from __future__ import annotations
 
-from Evaluators.attack import main
+from Evaluators.verify import main
 
 
 if __name__ == "__main__":

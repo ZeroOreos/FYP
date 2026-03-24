@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# gallery_dir + attack config -> cached attack pairs, probe generation, probe metrics paths and subprocess runs
+# gallery_dir + attack config -> cached attack pairs, probe materialization, probe metrics paths and subprocess runs
 
 from __future__ import annotations
 
@@ -14,7 +14,9 @@ from Utility.pipeline_common import maybe_run_generate, run_subprocess, validate
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ATTACK_PAIR_SCRIPT = PROJECT_ROOT / "Utility" / "attack_pair.py"
-ATTACK_EVAL_SCRIPT = PROJECT_ROOT / "Evaluators" / "attack_verification.py"
+ATTACK_EVAL_SCRIPT = PROJECT_ROOT / "Evaluators" / "attack.py"
+MODIFIER_SCRIPT = PROJECT_ROOT / "modifier.py"
+ATTACK_METADATA_FILENAME = "attack_metadata.json"
 
 
 def attack_pairs_output(model_results_dir: Path) -> tuple[Path, Path]:
@@ -83,29 +85,34 @@ def maybe_run_attack_generate(
     gallery_dir: Path,
     probe_dir: Path,
     attack_pairs_npz: Path,
+    attack_method: str,
     attack_generator_script: Optional[Path],
 ) -> Path:
-    manifest_path = probe_dir / "attack_manifest.json"
-    if probe_dir.exists() and manifest_path.exists():
+    metadata_path = probe_dir / ATTACK_METADATA_FILENAME
+    if probe_dir.exists() and metadata_path.exists():
         print(f"[SKIP] attack probe dataset exists: {probe_dir}")
-        return manifest_path
+        return metadata_path
 
     if attack_generator_script is None:
         raise FileNotFoundError(
-            "probe dataset / attack manifest missing and no --attack-generator-script was provided"
+            "probe dataset / attack metadata missing and no --attack-generator-script was provided"
         )
 
-    probe_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable,
-        str(attack_generator_script),
+        str(MODIFIER_SCRIPT),
         str(gallery_dir),
+        "--step",
+        attack_method,
+        "--pair-input",
         str(attack_pairs_npz),
+        "--generator-script",
+        str(attack_generator_script),
+        "--output-dir",
         str(probe_dir),
-        str(manifest_path),
     ]
-    run_subprocess(cmd, f"attack generator -> {probe_dir}")
-    return manifest_path
+    run_subprocess(cmd, f"modifier.py attack -> {probe_dir}")
+    return metadata_path
 
 
 def attack_metrics_output(probe_variant_name: str, model_name: str) -> Path:
@@ -115,7 +122,7 @@ def attack_metrics_output(probe_variant_name: str, model_name: str) -> Path:
 def maybe_run_attack_evaluate(
     gallery_embeddings: Path,
     probe_embeddings: Path,
-    attack_manifest: Path,
+    attack_metadata: Path,
     metrics_out: Path,
     pairs_file: Path,
 ) -> Path:
@@ -129,10 +136,10 @@ def maybe_run_attack_evaluate(
         str(ATTACK_EVAL_SCRIPT),
         str(gallery_embeddings),
         str(probe_embeddings),
-        str(attack_manifest),
+        str(attack_metadata),
         str(metrics_out),
         "--pairs-file",
         str(pairs_file),
     ]
-    run_subprocess(cmd, f"attack_verification.py -> {metrics_out}")
+    run_subprocess(cmd, f"attack.py -> {metrics_out}")
     return metrics_out

@@ -20,7 +20,7 @@
 - Flow: pairs -> embeddings -> verification metrics -> compiled results -> parsed tables
 - Reuse cached outputs when present
 - Model-specific scripts should generate embeddings only
-- Recognition evaluation should use one shared route via `Evaluators/verification.py`
+- Recognition evaluation should use one shared route via `Evaluators/verify.py`
 
 ## Attack Pipeline
 - Input: clean gallery root plus attack method configuration
@@ -48,8 +48,8 @@
 - `Utility/results_compile.py`: compiled / parsed result rebuild helpers
 - `Utility/results_parse.py`: readable result-table generation from `compiled_results.csv`
 - `Utility/attack_pair.py`: hard / semi-hard attack pair generation from embeddings
-- `Evaluators/verification.py`: shared clean / corruption / protection verification evaluator
-- `Evaluators/attack_verification.py`: shared impersonation / attack-success evaluator
+- `Evaluators/verify.py`: shared clean / corruption / protection verification evaluator
+- `Evaluators/attack.py`: shared impersonation / attack-success evaluator
 - `Models/<Model>/generate.py`: dataset root -> embeddings
 
 ## Dataset
@@ -164,8 +164,8 @@
 - Models should not own their own verification logic when they emit standard embeddings
 
 ## Evaluators
-- `Evaluators/verification.py`: `<pairs_file> <embeddings_file> <metrics_out>` -> verification metrics for all embedding backbones
-- `Evaluators/attack_verification.py`: `<gallery_embeddings> <probe_embeddings> <attack_metadata_json> <metrics_out>` -> attack metrics for all embedding backbones
+- `Evaluators/verify.py`: `<pairs_file> <embeddings_file> <metrics_out>` -> verification metrics for all embedding backbones
+- `Evaluators/attack.py`: `<gallery_embeddings> <probe_embeddings> <attack_metadata_json> <metrics_out>` -> attack metrics for all embedding backbones
 - Attack evaluation must report requested samples, scored samples, failed samples, and skipped samples
 - Attack metrics should include:
 - `attack_success_rate`
