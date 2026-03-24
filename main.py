@@ -16,7 +16,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 from Utility.pathfinder import resolve_dataset_context
 
@@ -225,6 +225,60 @@ def _variant_metadata_from_results_path(metrics_path: Path, metrics_data: Dict[s
     }
 
 
+def _transform_metadata_path(variant_meta: Dict[str, Any]) -> Optional[Path]:
+    base_dataset = variant_meta.get("base_dataset", "")
+    variant_name = variant_meta.get("variant_name", "")
+    if not base_dataset or not variant_name:
+        return None
+
+    candidate = DATASET_ROOT / base_dataset / variant_name / "transform.json"
+    if candidate.exists():
+        return candidate
+    return None
+
+
+def _load_transform_metadata(variant_meta: Dict[str, Any]) -> Dict[str, Any]:
+    metadata_path = _transform_metadata_path(variant_meta)
+    if metadata_path is None:
+        return {}
+    return _load_json(metadata_path)
+
+
+def _flatten_transform_metadata(transform_meta: Dict[str, Any]) -> Dict[str, Any]:
+    if not transform_meta:
+        return {
+            "transform_metadata_file": "",
+            "pipeline_summary": "",
+            "pipeline_json": "",
+            "latest_transform": "",
+            "oldest_transform": "",
+            "pipeline_seed": "",
+        }
+
+    pipeline = transform_meta.get("pipeline", [])
+    tokens = [step.get("token", "") for step in pipeline]
+    flattened = {
+        "transform_metadata_file": transform_meta.get("transform_metadata_file")
+        or (
+            str(Path(transform_meta.get("output_dataset_dir", "")) / "transform.json")
+            if transform_meta.get("output_dataset_dir")
+            else ""
+        ),
+        "pipeline_summary": " -> ".join(tokens),
+        "pipeline_json": json.dumps(pipeline, separators=(",", ":")),
+        "latest_transform": tokens[0] if tokens else "",
+        "oldest_transform": tokens[-1] if tokens else "",
+        "pipeline_seed": transform_meta.get("seed", ""),
+    }
+
+    for idx, step in enumerate(pipeline, start=1):
+        flattened[f"step_{idx}_token"] = step.get("token", "")
+        flattened[f"step_{idx}_modifier"] = step.get("modifier", "")
+        flattened[f"step_{idx}_params"] = json.dumps(step.get("params", {}), separators=(",", ":"))
+
+    return flattened
+
+
 def _flatten_tar_at_far(pooled_metrics: Dict[str, Any]) -> Dict[str, Any]:
     flattened: Dict[str, Any] = {}
     for key, entry in pooled_metrics.get("tar_at_far", {}).items():
@@ -248,6 +302,12 @@ def rebuild_compiled_csv() -> None:
         "variant_type",
         "num_transforms",
         "transform_chain",
+        "transform_metadata_file",
+        "pipeline_summary",
+        "pipeline_json",
+        "latest_transform",
+        "oldest_transform",
+        "pipeline_seed",
         "model",
         "pair_file",
         "embeddings_file",
@@ -281,11 +341,15 @@ def rebuild_compiled_csv() -> None:
         data = _load_json(path)
         pooled = data.get("pooled_metrics", {})
         variant_meta = _variant_metadata_from_results_path(path, data)
+        transform_meta = _load_transform_metadata(variant_meta)
+        transform_fields = _flatten_transform_metadata(transform_meta)
         tar_fields = _flatten_tar_at_far(pooled)
+        extra_fieldnames.extend([name for name in transform_fields if name not in base_fieldnames and name not in extra_fieldnames])
         extra_fieldnames.extend([name for name in tar_fields if name not in extra_fieldnames])
 
         row = {
             **variant_meta,
+            **transform_fields,
             "model": data.get("model", path.parent.name),
             "pair_file": data.get("pair_file") or variant_meta["pair_file"],
             "embeddings_file": data.get("embeddings_file", ""),

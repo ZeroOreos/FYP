@@ -1,232 +1,65 @@
-# FYP Verification Pipeline — Concise Construction Notes
-#
-# Purpose
-# - Reproducible face verification benchmarking across perturbation, protection, and hybrid datasets
-# - Multiple pretrained models, shared pairs, no training
-#
-# Core Layout
-# - main.py      : orchestrator (one dataset root per run)
-# - pairs.py     : shared pair generator / resolver
-# - Dataset/     : identity datasets + pair cache
-# - Models/      : per-model plugins (generate.py, evaluate.py)
-# - Results/     : embeddings, metrics, compiled summary
-#
-# Dataset Requirements
-# - Root contains identity folders: id_xxx/image files
-# - Exactly one dataset root processed per run
-# - Pair naming derived from the referenced base main root under Dataset/
-# - Variant roots must preserve identity consistency with base main set
-#
-# Dataset Variant Structure
-# - Each dataset root = base identities + one exact transform pipeline
-# - main is the clean canonical reference root
-# - Single modifiers/protections each get their own root
-# - Hybrids also get their own root
-# - Folder structure under every variant should mirror main exactly
-#
-# Example Structure
-# - Dataset/
-#   - CelebA/
-#     - main/
-#     - blur_sigma2_main/
-#     - jpeg_q30_main/
-#     - fawkes_main/
-#     - blur_sigma2__jpeg_q30_main/
-#   - pairs/
-#
-# Base-Tracking Naming Rule (CRITICAL)
-# - Modified/protected/hybrid dataset root names MUST end with the referenced base root name
-# - Rightmost token tracks the pair source
-# - This base suffix must always be present
-# - Example:
-#   - blur_sigma2_main            -> references main
-#   - jpeg_q30_main              -> references main
-#   - blur_sigma2__jpeg_q30_main -> references main
-# - This allows pair resolution without ambiguity
-#
-# Pair System
-# - One deterministic, balanced pair file per base dataset reference root
-# - Filename from Dataset-relative path of the referenced base root
-# - Example: Dataset/CelebA/main → Dataset/pairs/CelebA_main_pairs.npz
-# - Pairs are generated from base reference roots only
-# - All variants that end in _main reuse the main pair file
-#
-# Pair Reuse Rule
-# - Dataset/CelebA/main                       -> uses CelebA_main_pairs.npz
-# - Dataset/CelebA/blur_sigma2_main          -> uses CelebA_main_pairs.npz
-# - Dataset/CelebA/fawkes_main               -> uses CelebA_main_pairs.npz
-# - Dataset/CelebA/blur_sigma2__jpeg_q30_main -> uses CelebA_main_pairs.npz
-#
-# pairs.py
-# - Input:  python3 pairs.py <dataset_dir>
-# - Output: Dataset/pairs/<derived_base_name>_pairs.npz
-# - Behavior:
-#   - Resolve referenced base root from input dataset root name
-#   - Derive pair filename from referenced base root relative to Dataset/
-#   - Generate pair file only if missing
-#
-# main.py
-# - Input:  python3 main.py <dataset_dir>
-# - Outputs:
-#   - Dataset/pairs/<derived_base_name>_pairs.npz (if missing)
-#   - Results/<variant_name>/<Model>/embeddings.npz
-#   - Results/<variant_name>/<Model>/metrics.json
-#   - Results/compiled_results.csv (rebuilt each run)
-# - Behavior:
-#   - Resolve input dataset root
-#   - Resolve referenced base root from variant name
-#   - Resolve corresponding pair file
-#   - Generate pairs if missing
-#   - For each model:
-#     - Generate embeddings if missing
-#     - Evaluate metrics if missing
-#   - Rebuild compiled summary CSV
-#
-# Model Plugin Contract
-# - Models/<Model>/generate.py
-#   - Input:  <dataset_dir> <embeddings_out>
-#   - Output: embeddings.npz
-#   - Must embed all valid images in the given dataset root
-# - Models/<Model>/evaluate.py
-#   - Input:  <pairs_file> <embeddings_file> <metrics_out>
-#   - Output: metrics.json
-#   - Must evaluate using shared pairs only
-#
-# Cache Policy
-# - Reuse pairs if present
-# - Reuse embeddings if present
-# - Reuse metrics if present
-# - Always rebuild compiled_results.csv
-#
-# Scope
-# - Verification evaluation and robustness benchmarking only
-# - No training
-# - No fine-tuning
-# - No classifier fitting beyond evaluation-time threshold search/statistics
-#
-# Dataset Variants (One Exact Pipeline per Root)
-# - Each root = one transform condition applied to the same identities
-# - Identity labels must remain unchanged across all variants
-# - File structure should remain aligned with base main when possible
-# - Variants exist only to measure recognition robustness / protection effects
-#
-# Single Modifiers (Robustness)
-# - Downsampling / resolution loss
-# - Gaussian blur
-# - JPEG compression
-# - Illumination change (brightness / contrast / gamma)
-# - Misalignment (rotation / crop / scale)
-# - Occlusion (mask / sunglasses / block)
-#
-# Protection Methods (Privacy / Anti-FR)
-# - Fawkes (cloaking)
-# - LowKey (cloaking)
-# - AdvCloak-type cloaks
-# - DeepPrivacy2-type anonymization
-# - Face swap (e.g., SimSwap)
-# - Blur / pixelation baseline
-# - Adversarial perturbations (FGSM / PGD)
-#
-# Hybrid Handling
-# - Each hybrid = its own dataset root
-# - Hybrid root still preserves identity folders / filenames from base main
-# - Hybrid roots reuse the same pair file derived from the rightmost base suffix
-# - Folder name must encode ordered transform chain + referenced base root
-# - Order matters: blur_sigma2__jpeg_q30_main != jpeg_q30__blur_sigma2_main
-# - Prefer curated 2-way hybrids first; 3-way only if justified
-#
-# Hybrid Examples
-# - blur_sigma2__jpeg_q30_main
-# - downsample_x4__illum_gamma0p7_main
-# - fawkes__jpeg_q30_main
-# - lowkey__downsample_x4_main
-#
-# Hybrid Metadata
-# - Each hybrid root should optionally store transform.json
-# - Suggested fields:
-#   - base_dataset
-#   - referenced_base_root
-#   - variant_type
-#   - pipeline
-#   - ordered transform parameters
-#
-# Minimal High-Value Set (Recommended)
-# - Preprocess: downsample, blur, JPEG, illumination, occlusion
-# - Protection: Fawkes, LowKey, one anonymization method, blur baseline
-# - Hybrids: a small curated set of 2-way cases, especially degradation+degradation
-#   and protection+degradation
-#
-# Execution Flow (Machine-Relevant)
-# - Resolve dataset root
-# - Parse referenced base root from the rightmost suffix of dataset root name
-# - Derive pair file path from referenced base root
-# - Generate pairs if missing
-# - For each model:
-#   - Generate embeddings if missing
-#   - Evaluate metrics if missing
-# - Rebuild compiled summary CSV
-#
-# Results Layout
-# - Results/<variant_name>/<Model>/embeddings.npz
-# - Results/<variant_name>/<Model>/metrics.json
-# - Results/compiled_results.csv
-#
-# Compiled Summary Expectations
-# - One row per dataset variant × model
-# - Include enough metadata for cross-model / cross-variant comparison
-# - Recommended columns:
-#   - base_dataset
-#   - referenced_base_root
-#   - variant_name
-#   - variant_type (clean / single / hybrid)
-#   - num_transforms
-#   - transform_chain
-#   - model
-#   - pair_file
-#   - accuracy
-#   - auc
-#   - eer
-#   - tar_at_far targets
-#
-# Invariants
-# - Same pair file reused across all models for the same referenced base root
-# - Same referenced-base pair file reused across all variants ending in that base suffix
-# - Results isolated by variant and model
-# - Supports clean vs modified vs protected vs hybrid comparison
-# - Supports cross-model and cross-dataset comparison
-#
-# Naming Rules
-# - Use deterministic descriptive names
-# - Parameterize modifier folders when relevant
-# - Modified/protected/hybrid names must end with the referenced base root
-# - Recommended style:
-#   - blur_sigma2_main
-#   - jpeg_q30_main
-#   - downsample_x4_main
-#   - occlusion_30pct_main
-#   - pgd_eps4_main
-#   - blur_sigma2__jpeg_q30_main
-#
-# Non-Goals
-# - Training pipeline
-# - Label remapping
-# - Mixed uncontrolled augmentations
-# - On-the-fly hybrid generation during evaluation
-#
-# Note for Model Implementations
-# - Write the contract atop each model code
-# - generate.py and evaluate.py must obey shared pipeline I/O exactly
-# - Models must not generate their own pairs independently
-#
-# Evaluator Footnote
-# - Evaluators should anticipate partial identity/image matching failure
-# - Pair-to-embedding mapping may fail for some entries due to missing outputs,
-#   unreadable files, skipped images, preprocessing mismatch, or path mismatch
-# - Do not crash immediately on limited unmapped pairs unless coverage becomes too low
-# - Record counts of requested, matched, skipped, and failed pairs
-# - Save warnings/examples of failed mappings for diagnosis
-# - Continue evaluation on the matched subset when safe, and report reduced coverage
-# - Hard fail only when failures indicate a systemic mapping problem or invalid result
-#   quality (e.g. too many missing pairs, class collapse, empty genuine/impostor set)
-# - metrics.json should include failure/skip statistics so later analysis can judge
-#   reliability of the reported metrics
+# FYP Pipeline Constructor
+
+## Scope
+- Verification benchmarking only.
+- Shared pairs across variants that reference the same base root.
+- No training, fine-tuning, relabeling, or uncontrolled augmentation.
+
+## Layout
+- `main.py`: run evaluation for one dataset root.
+- `pairs.py`: generate or reuse one pair file for one referenced base root.
+- `modifier.py`: materialize preprocessing variants under `Dataset/`.
+- `Models/<Model>/generate.py`: dataset root -> embeddings.
+- `Models/<Model>/evaluate.py`: pairs + embeddings -> metrics.
+
+## Dataset
+- One dataset root is `Dataset/<dataset>/<variant_root>`.
+- Each root contains identity folders and images.
+- Variants preserve identity folders, filenames, and relative paths.
+- Variants change pixels only.
+
+Prototype:
+- `Dataset/<dataset>/<transform_chain>_<base_root>`
+
+## Naming
+- Every non-clean variant must end with `_ <base_root>` in plain form, i.e. the referenced base root is always the rightmost suffix token.
+- The transform chain sits to the left of the base suffix and uses `__` as the separator.
+- The chain is ordered newest-leftmost.
+- Adding a new modifier prepends a new token.
+- Tokens should be short, deterministic, and parameterized when needed.
+
+Sample:
+- `jpeg_q30__blur_sigma2_main`
+
+## Pairs
+- Pair files are derived from the referenced base root, not the full variant chain.
+- All variants ending in the same base suffix reuse the same pair file.
+- Pair path format is `Dataset/pairs/<dataset_relative_base_root>_pairs.npz`.
+
+## Script I/O
+- `pairs.py`: `python3 pairs.py <dataset_dir>` -> `Dataset/pairs/<derived_base_name>_pairs.npz`
+- `modifier.py`: `python3 modifier.py <dataset_dir> --step <modifier_spec> [--step ...]` -> `Dataset/<dataset>/<derived_variant_root>`
+- `main.py`: `python3 main.py <dataset_dir>` -> pairs if missing, then embeddings, metrics, and rebuilt compiled summary
+- `Models/<Model>/generate.py`: `<dataset_dir> <embeddings_out>` -> `embeddings.npz`
+- `Models/<Model>/evaluate.py`: `<pairs_file> <embeddings_file> <metrics_out>` -> `metrics.json`
+
+## Variant Types
+- clean: canonical root such as `main`, `train`, or `val`
+- single: one transform token before the base suffix
+- hybrid: multiple ordered transform tokens before the base suffix
+
+## Metadata and Cache
+- Variant roots may include `transform.json` in the same root directory as the output identity folders.
+- `compiled_results.csv` should read and flatten `transform.json` into readable columns such as pipeline summary, latest transform, oldest transform, and per-step token fields.
+- Reuse pairs, embeddings, and metrics when present.
+- Always rebuild `Results/compiled_results.csv`.
+
+## Invariants
+- The same referenced base root always maps to the same pair file.
+- Results are isolated by variant and model.
+- The pipeline must support clean vs modified vs protected vs hybrid comparison.
+
+## Evaluator Robustness
+- Evaluators should tolerate limited mapping failures.
+- Record requested, matched, skipped, and failed pairs.
+- Hard fail only on systemic mapping failure or invalid result quality.
