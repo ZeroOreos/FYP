@@ -1,3 +1,4 @@
+# python3 FaceNet_saveEmbed.py <root_dir> [...] -> embedding output
 import os
 import csv
 import argparse

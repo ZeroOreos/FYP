@@ -1,3 +1,4 @@
+# ArcFaceModel(...) | ArcMarginProduct(...); forward(...) -> embeddings or logits
 import math
 import torch
 import torch.nn as nn

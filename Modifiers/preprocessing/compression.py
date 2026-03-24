@@ -1,4 +1,4 @@
-# JPEGCompression(severity=None, quality=None, seed=None); apply(image, rng=None) -> same-size JPEG-degraded image
+# JPEGCompression(...); apply(image, rng=None) -> same-size JPEG image
 
 from __future__ import annotations
 

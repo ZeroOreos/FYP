@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""
-main.py
-
-Orchestrator for the FYP verification workflow.
-
-Stages:
-1) pairs.py -> Dataset/pairs/<derived_base_name>_pairs.npz
-2) Models/<Model>/generate.py -> Results/<variant_name>/<Model>/embeddings.npz
-3) Models/<Model>/evaluate.py -> Results/<variant_name>/<Model>/metrics.json
-4) Rebuild Results/compiled_results.csv from all available metrics files
-"""
+# python3 main.py <dataset_dir> [--throttle] -> pairs, embeddings, metrics, compiled_results.csv
 
 import csv
 import json

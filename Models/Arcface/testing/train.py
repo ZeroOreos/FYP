@@ -1,3 +1,4 @@
+# python3 train.py [...] -> model / checkpoint output
 import os
 import random
 from collections import Counter

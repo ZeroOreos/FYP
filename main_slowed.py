@@ -1,37 +1,5 @@
 #!/usr/bin/env python3
-"""
-main_slowed.py — Thermal-aware orchestrator for FYP verification pipeline.
-
-RECOMMENDED: Use --plugin-throttle to apply in-process throttling via batch_size/batch_delay.
-FALLBACK:   Use --pause-generate to only SIGSTOP the embedding generation stages.
-
-Key insight: Embedding generation is ~90% of heat; pairs and evaluate are lightweight.
-- --plugin-throttle: Reduce batch_size + add inter-batch delays (no state loss, smooth)
-- --pause-generate:  Only SIGSTOP during generate.py runs (process-level, targeted)
-
-Usage examples:
-    python3 main_slowed.py /path/to/dataset --plugin-throttle
-    python3 main_slowed.py /path/to/dataset --pause-generate --run-seconds 420 --cooldown-seconds 120
-    python3 main_slowed.py /path/to/dataset --pause-generate --cpu-threshold 85 --disable-load-trigger
-
-Behavior:
-- main.py orchestrates 4 stages: pairs → generate → evaluate → compile CSV
-- If --plugin-throttle: passes --throttle to main.py (preferred baseline)
-- If --pause-generate: defaults to stage-aware pausing only during generate.py
-- If --pause-generate: also passes --throttle unless --disable-main-throttle is set
-- If --pause-generate + high CPU: applies extra cooldown early
-
-Why smarter than naive SIGSTOP:
-- Pairs generation runs per-dataset once (fast)
-- Evaluation is threshold-tuning, not I/O-bound (fast)
-- Embedding generation is the GPU/CPU hotspot (needs throttling)
-- Pausing layers 2-3 wastes time; layers 1 & 4 don't need it
-
-Notes:
-- macOS-specific SIGSTOP/SIGCONT require Unix-like OS
-- In-process throttling is preferred: no pause overhead, no cache loss
-- For maximum control, use --plugin-throttle (main.py --throttle) before pause mode
-"""
+# python3 main_slowed.py <dataset_dir> [throttle options] -> throttled pairs, embeddings, metrics, compiled_results.csv
 
 from __future__ import annotations
 

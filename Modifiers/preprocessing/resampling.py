@@ -1,4 +1,4 @@
-# ResolutionResampling(severity=None, scale=None, downsample_mode=..., upsample_mode=..., seed=None); apply(image, rng=None) -> same-size degraded image
+# ResolutionResampling(...); apply(image, rng=None) -> same-size degraded image
 
 from __future__ import annotations
 

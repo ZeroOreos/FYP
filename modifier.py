@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# python3 modifier.py <dataset_dir> --step <name[:k=v,...]> [--step ...] -> materialize Dataset/<dataset>/<newest__...__base_root> with preserved structure and newest-leftmost naming
+# python3 modifier.py <dataset_dir> --step <name[:k=v,...]> [--step ...] -> Dataset/<dataset>/<newest__...__base_root>; preserves structure
+
 
 from __future__ import annotations
 
@@ -223,13 +224,11 @@ def build_modifier(step: StepConfig, base_seed: int) -> Any:
 
 def derive_output_variant_name(dataset_dir: Path, steps: list[StepConfig]) -> str:
     context = resolve_dataset_context(dataset_dir)
-    existing_tokens: list[str] = []
+    tokens: list[str] = []
     if context.variant_name != context.base_root_name:
         if context.transform_chain != "clean":
-            existing_tokens.extend(token for token in context.transform_chain.split("__") if token)
-
-    new_tokens = [step.token for step in steps]
-    tokens = list(reversed(new_tokens)) + existing_tokens
+            tokens.extend(token for token in context.transform_chain.split("__") if token)
+    tokens.extend(step.token for step in steps)
     if not tokens:
         raise ValueError("at least one modifier step is required")
     return f"{'__'.join(tokens)}_{context.base_root_name}"
@@ -303,11 +302,9 @@ def process_job(job: Job, steps: list[StepConfig], seed: int, overwrite: bool) -
 
 def write_transform_metadata(dataset_dir: Path, output_dir: Path, steps: list[StepConfig], seed: int, num_workers: int) -> None:
     context = resolve_dataset_context(dataset_dir)
-    metadata_path = output_dir / "transform.json"
     metadata = {
         "input_dataset_dir": str(dataset_dir.resolve()),
         "output_dataset_dir": str(output_dir.resolve()),
-        "transform_metadata_file": str(metadata_path.resolve()),
         "base_dataset": context.base_dataset_name,
         "referenced_base_root": context.base_root_name,
         "variant_name": output_dir.name,
@@ -323,7 +320,7 @@ def write_transform_metadata(dataset_dir: Path, output_dir: Path, steps: list[St
         "seed": seed,
         "num_workers": num_workers,
     }
-    with open(metadata_path, "w", encoding="utf-8") as handle:
+    with open(output_dir / "transform.json", "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
 
 

@@ -1,4 +1,4 @@
-# FaceMaskOcclusion(severity=None, coverage=None, color=(...), seed=None) | EyeBandOcclusion(severity=None, band_height=None, color=(...), seed=None) | RandomBlockOcclusion(severity=None, area_ratio=None, color=None, aspect_ratio=1.0, seed=None); apply(image, rng=None) -> same-size occluded image
+# FaceMaskOcclusion(...) | EyeBandOcclusion(...) | RandomBlockOcclusion(...); apply(image, rng=None) -> same-size occluded image
 
 from __future__ import annotations
 

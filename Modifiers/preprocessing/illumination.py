@@ -1,4 +1,4 @@
-# BrightnessShift(severity=None, factor=None, seed=None) | ContrastShift(severity=None, factor=None, seed=None) | GammaShift(severity=None, gamma=None, seed=None); apply(image, rng=None) -> same-size illumination-shifted image
+# BrightnessShift(...) | ContrastShift(...) | GammaShift(...); apply(image, rng=None) -> same-size illumination-shifted image
 
 from __future__ import annotations
 

@@ -1,3 +1,4 @@
+# python3 test_insightFace.py -> smoke-test output
 from insightface.app import FaceAnalysis
 import cv2
 

@@ -1,3 +1,4 @@
+# python3 partitioner.py [...] -> partitioned dataset roots
 import os
 import random
 import shutil

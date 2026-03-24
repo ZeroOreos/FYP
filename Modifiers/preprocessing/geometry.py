@@ -1,4 +1,4 @@
-# RotationMisalignment(severity=None, degrees=None, seed=None); apply(image, rng=None) -> same-size rotated image
+# RotationMisalignment(...); apply(image, rng=None) -> same-size rotated image
 
 from __future__ import annotations
 

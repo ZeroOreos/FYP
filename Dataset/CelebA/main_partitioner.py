@@ -1,3 +1,4 @@
+# python3 main_partitioner.py [...] -> partitioned dataset roots
 import shutil
 from collections import defaultdict
 from pathlib import Path

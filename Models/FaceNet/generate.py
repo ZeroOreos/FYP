@@ -1,10 +1,4 @@
-"""
-Model Plugin Contract
-- Input:  python3 generate.py <dataset_dir> <embeddings_out> [batch_size] [batch_delay]
-- Output: embeddings.npz with keys: embeddings, image_paths, labels
-- Requirement: embed all valid images from the given dataset root only
-- Shared pipeline note: pair generation is handled centrally by pairs.py/main.py
-"""
+# python3 generate.py <dataset_dir> <embeddings_out> [batch_size] [batch_delay] -> embeddings.npz
 
 import sys
 import time

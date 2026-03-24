@@ -1,3 +1,4 @@
+# python3 insightFace_embed_extrac.py -> embedding output
 import os
 import glob
 import cv2

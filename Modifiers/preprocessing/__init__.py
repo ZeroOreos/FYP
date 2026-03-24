@@ -1,4 +1,4 @@
-# from Modifiers.preprocessing import ...; modifier = SomeModifier(...); out = modifier.apply(image, rng=None)
+# from Modifiers.preprocessing import ...; modifier(...).apply(image, rng=None) -> image
 
 from .base import PreprocessingModifier
 from .blur import GaussianBlur, MotionBlur

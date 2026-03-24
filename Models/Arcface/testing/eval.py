@@ -1,3 +1,4 @@
+# python3 eval.py [...] -> evaluation output
 import torch
 import torch.nn.functional as F
 from typing import cast

@@ -1,3 +1,4 @@
+# python3 benchmark.py -> benchmark output
 import os
 
 os.environ.setdefault("OMP_NUM_THREADS", "8")

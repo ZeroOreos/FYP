@@ -1,4 +1,4 @@
-# PreprocessingModifier(severity=None, seed=None); apply(image: PIL.Image | np.ndarray, rng=None) -> PIL.Image | np.ndarray with same type and size
+# PreprocessingModifier(severity=None, seed=None); apply(image, rng=None) -> same type, same size
 
 from __future__ import annotations
 

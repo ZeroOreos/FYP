@@ -1,3 +1,4 @@
+# resolve_dataset_context(dataset_dir) -> DatasetContext with base root, transform chain, and pair file info
 from __future__ import annotations
 
 from dataclasses import dataclass

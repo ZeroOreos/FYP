@@ -1,10 +1,4 @@
-"""
-Model Plugin Contract
-- Input:  python3 evaluate.py <pairs_file> <embeddings_file> <metrics_out> [options]
-- Output: metrics.json
-- Requirement: evaluate using the shared pairs file only
-- Shared pipeline note: this evaluator must not generate its own verification pairs
-"""
+# python3 evaluate.py <pairs_file> <embeddings_file> <metrics_out> [options] -> metrics.json; shared pairs only
 
 import argparse
 import json

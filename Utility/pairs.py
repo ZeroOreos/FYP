@@ -1,3 +1,4 @@
+# python3 Utility/pairs.py <dataset_dir> -> pair data and pair-file helpers
 import argparse
 import hashlib
 import itertools

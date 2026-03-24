@@ -1,65 +1,13 @@
-# FYP Pipeline Constructor
+# FYP Constructor
 
-## Scope
-- Verification benchmarking only.
-- Shared pairs across variants that reference the same base root.
-- No training, fine-tuning, relabeling, or uncontrolled augmentation.
-
-## Layout
-- `main.py`: run evaluation for one dataset root.
-- `pairs.py`: generate or reuse one pair file for one referenced base root.
-- `modifier.py`: materialize preprocessing variants under `Dataset/`.
-- `Models/<Model>/generate.py`: dataset root -> embeddings.
-- `Models/<Model>/evaluate.py`: pairs + embeddings -> metrics.
-
-## Dataset
-- One dataset root is `Dataset/<dataset>/<variant_root>`.
-- Each root contains identity folders and images.
-- Variants preserve identity folders, filenames, and relative paths.
-- Variants change pixels only.
-
-Prototype:
-- `Dataset/<dataset>/<transform_chain>_<base_root>`
-
-## Naming
-- Every non-clean variant must end with `_ <base_root>` in plain form, i.e. the referenced base root is always the rightmost suffix token.
-- The transform chain sits to the left of the base suffix and uses `__` as the separator.
-- The chain is ordered newest-leftmost.
-- Adding a new modifier prepends a new token.
-- Tokens should be short, deterministic, and parameterized when needed.
-
-Sample:
-- `jpeg_q30__blur_sigma2_main`
-
-## Pairs
-- Pair files are derived from the referenced base root, not the full variant chain.
-- All variants ending in the same base suffix reuse the same pair file.
-- Pair path format is `Dataset/pairs/<dataset_relative_base_root>_pairs.npz`.
-
-## Script I/O
-- `pairs.py`: `python3 pairs.py <dataset_dir>` -> `Dataset/pairs/<derived_base_name>_pairs.npz`
-- `modifier.py`: `python3 modifier.py <dataset_dir> --step <modifier_spec> [--step ...]` -> `Dataset/<dataset>/<derived_variant_root>`
-- `main.py`: `python3 main.py <dataset_dir>` -> pairs if missing, then embeddings, metrics, and rebuilt compiled summary
-- `Models/<Model>/generate.py`: `<dataset_dir> <embeddings_out>` -> `embeddings.npz`
-- `Models/<Model>/evaluate.py`: `<pairs_file> <embeddings_file> <metrics_out>` -> `metrics.json`
-
-## Variant Types
-- clean: canonical root such as `main`, `train`, or `val`
-- single: one transform token before the base suffix
-- hybrid: multiple ordered transform tokens before the base suffix
-
-## Metadata and Cache
-- Variant roots may include `transform.json` in the same root directory as the output identity folders.
-- `compiled_results.csv` should read and flatten `transform.json` into readable columns such as pipeline summary, latest transform, oldest transform, and per-step token fields.
-- Reuse pairs, embeddings, and metrics when present.
-- Always rebuild `Results/compiled_results.csv`.
-
-## Invariants
-- The same referenced base root always maps to the same pair file.
-- Results are isolated by variant and model.
-- The pipeline must support clean vs modified vs protected vs hybrid comparison.
-
-## Evaluator Robustness
-- Evaluators should tolerate limited mapping failures.
-- Record requested, matched, skipped, and failed pairs.
-- Hard fail only on systemic mapping failure or invalid result quality.
+- Root: `Dataset/<dataset>/<transform_chain>_<base_root>`
+- Naming: transform chain uses `__`, newest-leftmost, base root always rightmost
+- Sample: `jpeg_q30__blur_sigma2_main`
+- Pairs: `Dataset/pairs/<dataset_relative_base_root>_pairs.npz`
+- `pairs.py`: `python3 pairs.py <dataset_dir>` -> pair file
+- `modifier.py`: `python3 modifier.py <dataset_dir> --step <modifier_spec> [--step ...]` -> derived variant root with preserved structure
+- `main.py`: `python3 main.py <dataset_dir>` -> pairs, embeddings, metrics, compiled summary
+- `Models/<Model>/generate.py`: `<dataset_dir> <embeddings_out>` -> embeddings
+- `Models/<Model>/evaluate.py`: `<pairs_file> <embeddings_file> <metrics_out>` -> metrics
+- `transform.json`: stored in each generated variant root; `compiled_results.csv` reads and flattens it
+- Reuse pairs, embeddings, metrics when present; always rebuild compiled summary

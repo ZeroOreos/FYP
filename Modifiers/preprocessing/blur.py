@@ -1,4 +1,4 @@
-# GaussianBlur(severity=None, sigma=None, seed=None) | MotionBlur(severity=None, length=None, angle=None, seed=None); apply(image, rng=None) -> same-size blurred image
+# GaussianBlur(...) | MotionBlur(...); apply(image, rng=None) -> same-size blurred image
 
 from __future__ import annotations
 

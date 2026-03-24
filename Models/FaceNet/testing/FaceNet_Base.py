@@ -1,3 +1,4 @@
+# python3 FaceNet_Base.py -> embedding utility output
 import torch
 import torch.nn.functional as F
 from facenet_pytorch import MTCNN, InceptionResnetV1

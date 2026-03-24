@@ -1,3 +1,4 @@
+# ArcFaceDataset(root, class_to_idx, transform=None) -> torch Dataset
 import os
 from pathlib import Path
 from PIL import Image
