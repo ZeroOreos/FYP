@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# python3 main_slowed.py <dataset_dir> [throttle options] -> throttled pairs, embeddings, metrics, compiled_results.csv
+# python3 main_recognition_slowed.py <dataset_dir> [throttle options] -> throttled recognition pipeline
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ try:
     import psutil
 except ImportError:
     print(
-        "[ERROR] psutil is required for main_slowed.py.\n"
+        "[ERROR] psutil is required for slowed/main_recognition_slowed.py.\n"
         "Install it with:\n"
         "    python3 -m pip install psutil",
         file=sys.stderr,
@@ -25,7 +25,7 @@ except ImportError:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run main.py with thermal-aware control: plugin throttling or process-level pause.",
+        description="Run main_recognition.py with thermal-aware control: plugin throttling or process-level pause.",
         epilog="RECOMMENDED: Use --plugin-throttle. FALLBACK: Use --pause-generate."
     )
 
@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
         "--main-script",
         type=str,
         default=None,
-        help="Path to main.py. Defaults to main.py in the same folder as this script.",
+        help="Path to main_recognition.py. Defaults to main_recognition.py in the same folder as this script.",
     )
     parser.add_argument(
         "--python-bin",
@@ -83,7 +83,7 @@ def parse_args() -> argparse.Namespace:
         "--cpu-threshold",
         type=float,
         default=90.0,
-        help="CPU threshold (%) for early pause. Only used with --pause-generate. Default: 90.0.",
+        help="CPU threshold (%%) for early pause. Only used with --pause-generate. Default: 90.0.",
     )
     parser.add_argument(
         "--cpu-check-window",
@@ -112,7 +112,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--disable-main-throttle",
         action="store_true",
-        help="In --pause-generate mode, do not pass --throttle to main.py.",
+        help="In --pause-generate mode, do not pass --throttle to main_recognition.py.",
     )
     parser.add_argument(
         "--min-cooldown-seconds",
@@ -141,7 +141,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print the command and settings without running main.py.",
+        help="Print the command and settings without running main_recognition.py.",
     )
 
     return parser.parse_args()
@@ -151,10 +151,10 @@ def resolve_main_script(path_arg: str | None) -> Path:
     if path_arg:
         main_path = Path(path_arg).expanduser().resolve()
     else:
-        main_path = (Path(__file__).resolve().parent / "main.py").resolve()
+        main_path = (Path(__file__).resolve().parent.parent / "main_recognition.py").resolve()
 
     if not main_path.exists():
-        raise FileNotFoundError(f"main.py not found at: {main_path}")
+        raise FileNotFoundError(f"main_recognition.py not found at: {main_path}")
     return main_path
 
 
@@ -269,7 +269,7 @@ def main() -> int:
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 1
 
-    print("[INFO] === main_slowed.py thermal-aware orchestrator ===")
+    print("[INFO] === slowed/main_recognition_slowed.py thermal-aware orchestrator ===")
     print(f"[INFO] Input directory:  {input_dir}")
     print(f"[INFO] Main script:      {main_script}")
     print(f"[INFO] Python binary:    {args.python_bin}")
@@ -284,7 +284,7 @@ def run_with_plugin_throttle(main_script: Path, input_dir: Path, args: argparse.
     cmd = [args.python_bin, str(main_script), str(input_dir), "--throttle"]
 
     print("\n[MODE] Plugin-level throttling (RECOMMENDED)")
-    print("[INFO] Passing --throttle to main.py")
+    print("[INFO] Passing --throttle to main_recognition.py")
     print(f"[INFO] Command: {' '.join(cmd)}")
 
     if args.dry_run:
@@ -294,7 +294,7 @@ def run_with_plugin_throttle(main_script: Path, input_dir: Path, args: argparse.
         result = subprocess.run(cmd, check=False)
         return result.returncode
     except Exception as exc:
-        print(f"[ERROR] Failed to run main.py: {exc}", file=sys.stderr)
+        print(f"[ERROR] Failed to run main_recognition.py: {exc}", file=sys.stderr)
         return 1
 
 
@@ -320,7 +320,7 @@ def run_with_pause_generate(main_script: Path, input_dir: Path, args: argparse.N
     try:
         popen = subprocess.Popen(cmd)
     except Exception as exc:
-        print(f"[ERROR] Failed to start main.py: {exc}", file=sys.stderr)
+        print(f"[ERROR] Failed to start main_recognition.py: {exc}", file=sys.stderr)
         return 1
 
     try:
@@ -330,7 +330,7 @@ def run_with_pause_generate(main_script: Path, input_dir: Path, args: argparse.N
         popen.terminate()
         return 1
 
-    print(f"[INFO] Started main.py with PID {popen.pid}")
+    print(f"[INFO] Started main_recognition.py with PID {popen.pid}")
 
     try:
         proc.cpu_percent(interval=None)
@@ -350,7 +350,7 @@ def run_with_pause_generate(main_script: Path, input_dir: Path, args: argparse.N
         while True:
             ret = popen.poll()
             if ret is not None:
-                print(f"\n[INFO] main.py exited with code {ret}")
+                print(f"\n[INFO] main_recognition.py exited with code {ret}")
                 return ret
 
             time.sleep(args.poll_seconds)
@@ -439,7 +439,7 @@ def run_with_pause_generate(main_script: Path, input_dir: Path, args: argparse.N
 
                 cooldown_time = adaptive_cooldown_seconds(args, avg_cpu, load_cycle_due)
 
-                print(f"\n[INFO] Pausing main.py due to {reason}.")
+                print(f"\n[INFO] Pausing main_recognition.py due to {reason}.")
                 print(f"[INFO] Adaptive cooldown: {cooldown_time}s")
                 stop_process_tree(proc)
                 was_paused = True
@@ -447,7 +447,7 @@ def run_with_pause_generate(main_script: Path, input_dir: Path, args: argparse.N
 
                 sleep_with_progress(cooldown_time, "[COOLDOWN]")
 
-                print("[INFO] Resuming main.py.")
+                print("[INFO] Resuming main_recognition.py.")
                 continue_process_tree(proc)
                 was_paused = False
 

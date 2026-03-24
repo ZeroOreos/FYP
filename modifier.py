@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# python3 modifier.py <dataset_dir> --step <name[:k=v,...]> [--step ...] -> Dataset/<dataset>/<newest__...__base_root>; preserves structure
+# python3 modifier.py <dataset_dir> --step <name[:k=v,...]> [--step ...] [--pair-input <atkpairs>] -> Dataset/<dataset>/<newest__...__base_root>; preserves structure
 
 
 from __future__ import annotations
@@ -292,6 +292,41 @@ def collect_jobs(dataset_dir: Path, output_dir: Path) -> list[Job]:
     return jobs
 
 
+def collect_jobs_from_pair_input(dataset_dir: Path, output_dir: Path, pair_input: Path) -> list[Job]:
+    data = np.load(pair_input, allow_pickle=True)
+    candidate_keys = ["victim_image", "target_image", "image_paths"]
+    image_list = None
+    for key in candidate_keys:
+        if key in data.files:
+            image_list = [str(value) for value in data[key].tolist()]
+            break
+    if image_list is None:
+        raise ValueError(f"pair input does not contain a supported image path key: {pair_input}")
+
+    jobs: list[Job] = []
+    seen: set[str] = set()
+    for image_str in image_list:
+        src_path = Path(image_str)
+        if not src_path.is_absolute():
+            src_path = (dataset_dir / image_str).resolve()
+        if not src_path.exists():
+            continue
+        relative = src_path.relative_to(dataset_dir.resolve()).as_posix()
+        if relative in seen:
+            continue
+        seen.add(relative)
+        jobs.append(
+            Job(
+                src_path=src_path,
+                dst_path=output_dir / relative,
+                relative_path=relative,
+            )
+        )
+    if not jobs:
+        raise RuntimeError(f"no valid images resolved from pair input: {pair_input}")
+    return jobs
+
+
 def stable_image_seed(global_seed: int, relative_path: str) -> int:
     digest = hashlib.sha256(f"{global_seed}:{relative_path}".encode("utf-8")).digest()
     return int.from_bytes(digest[:8], "big", signed=False)
@@ -306,7 +341,7 @@ def save_image(image: Image.Image, path: Path) -> None:
         image.save(path)
 
 
-def process_job(job: Job, steps: list[StepConfig], seed: int, overwrite: bool) -> tuple[str, str | None]:
+def process_job(job: Job, steps: list[StepConfig], seed: int, overwrite: bool) -> tuple[str, Optional[str]]:
     if job.dst_path.exists() and not overwrite:
         return "skipped", None
 
@@ -356,8 +391,16 @@ def write_transform_metadata(dataset_dir: Path, output_dir: Path, steps: list[St
         json.dump(metadata, handle, indent=2)
 
 
-def materialize_dataset(dataset_dir: Path, output_dir: Path, steps: list[StepConfig], seed: int, num_workers: int, overwrite: bool) -> None:
-    jobs = collect_jobs(dataset_dir, output_dir)
+def materialize_dataset(
+    dataset_dir: Path,
+    output_dir: Path,
+    steps: list[StepConfig],
+    seed: int,
+    num_workers: int,
+    overwrite: bool,
+    pair_input: Optional[Path],
+) -> None:
+    jobs = collect_jobs_from_pair_input(dataset_dir, output_dir, pair_input) if pair_input else collect_jobs(dataset_dir, output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     written = 0
@@ -367,7 +410,7 @@ def materialize_dataset(dataset_dir: Path, output_dir: Path, steps: list[StepCon
     max_inflight = max(num_workers, num_workers * MAX_INFLIGHT_MULTIPLIER)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-        pending: dict[concurrent.futures.Future[tuple[str, str | None]], Job] = {}
+        pending: dict[concurrent.futures.Future[tuple[str, Optional[str]]], Job] = {}
         job_iter = iter(jobs)
         processed = 0
 
@@ -438,6 +481,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-workers", type=int, default=max(1, (os.cpu_count() or 4) - 1))
+    parser.add_argument("--pair-input", type=str, default=None, help="Optional atkpairs npz to restrict materialization to referenced images.")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--force", action="store_true", help="Allow writing into an existing output variant root.")
     return parser.parse_args()
@@ -451,6 +495,7 @@ def main() -> None:
     steps = [parse_step_spec(raw_step) for raw_step in args.step]
     validate_step_uniqueness(dataset_dir, steps)
     output_dir = derive_output_dataset_dir(dataset_dir, steps)
+    pair_input = Path(args.pair_input).resolve() if args.pair_input else None
 
     print(f"[INFO] input: {dataset_dir}")
     print(f"[INFO] steps: {[step.token for step in steps]}")
@@ -470,6 +515,7 @@ def main() -> None:
         seed=args.seed,
         num_workers=max(1, args.num_workers),
         overwrite=args.overwrite,
+        pair_input=pair_input,
     )
 
 
