@@ -34,6 +34,7 @@ from Utility.pathfinder import resolve_dataset_context
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 VALID_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+MAX_INFLIGHT_MULTIPLIER = 4
 
 
 def _fmt_number(value: float) -> str:
@@ -224,11 +225,12 @@ def build_modifier(step: StepConfig, base_seed: int) -> Any:
 
 def derive_output_variant_name(dataset_dir: Path, steps: list[StepConfig]) -> str:
     context = resolve_dataset_context(dataset_dir)
-    tokens: list[str] = []
+    existing_tokens: list[str] = []
     if context.variant_name != context.base_root_name:
         if context.transform_chain != "clean":
-            tokens.extend(token for token in context.transform_chain.split("__") if token)
-    tokens.extend(step.token for step in steps)
+            existing_tokens.extend(token for token in context.transform_chain.split("__") if token)
+    new_tokens = [step.token for step in steps]
+    tokens = list(reversed(new_tokens)) + existing_tokens
     if not tokens:
         raise ValueError("at least one modifier step is required")
     return f"{'__'.join(tokens)}_{context.base_root_name}"
@@ -332,22 +334,48 @@ def materialize_dataset(dataset_dir: Path, output_dir: Path, steps: list[StepCon
     skipped = 0
     failures: list[str] = []
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-        futures = [
-            executor.submit(process_job, job, steps, seed, overwrite)
-            for job in jobs
-        ]
-        for idx, future in enumerate(concurrent.futures.as_completed(futures), start=1):
-            status, error = future.result()
-            if status == "written":
-                written += 1
-            elif status == "skipped":
-                skipped += 1
-            else:
-                failures.append(error or "unknown failure")
+    max_inflight = max(num_workers, num_workers * MAX_INFLIGHT_MULTIPLIER)
 
-            if idx % 250 == 0 or idx == len(jobs):
-                print(f"[INFO] processed {idx}/{len(jobs)} images")
+    with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+        pending: dict[concurrent.futures.Future[tuple[str, str | None]], Job] = {}
+        job_iter = iter(jobs)
+        processed = 0
+
+        def submit_until_full() -> None:
+            while len(pending) < max_inflight:
+                try:
+                    job = next(job_iter)
+                except StopIteration:
+                    break
+                future = executor.submit(process_job, job, steps, seed, overwrite)
+                pending[future] = job
+
+        submit_until_full()
+
+        while pending:
+            done, _ = concurrent.futures.wait(
+                pending,
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            for future in done:
+                job = pending.pop(future)
+                try:
+                    status, error = future.result()
+                except Exception as exc:
+                    status, error = "failed", f"{job.relative_path}: {exc}"
+
+                processed += 1
+                if status == "written":
+                    written += 1
+                elif status == "skipped":
+                    skipped += 1
+                else:
+                    failures.append(error or "unknown failure")
+
+                if processed % 250 == 0 or processed == len(jobs):
+                    print(f"[INFO] processed {processed}/{len(jobs)} images")
+
+            submit_until_full()
 
     if failures:
         failures_path = output_dir / "failures.json"
@@ -398,10 +426,8 @@ def main() -> None:
     print(f"[INFO] output: {output_dir}")
 
     if output_dir.exists() and not args.force:
-        raise FileExistsError(
-            f"output variant already exists: {output_dir}\n"
-            "use --force to reuse the root or choose a different modifier chain"
-        )
+        print(f"[WARN] output variant already exists, skipping: {output_dir}")
+        return
 
     if output_dir.exists() and args.force and not output_dir.is_dir():
         raise NotADirectoryError(output_dir)

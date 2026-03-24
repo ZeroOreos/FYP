@@ -1,0 +1,19 @@
+{
+  "input_dataset_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/CelebA/main",
+  "output_dataset_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/CelebA/blur_sigma2_main",
+  "base_dataset": "CelebA",
+  "referenced_base_root": "main",
+  "variant_name": "blur_sigma2_main",
+  "variant_type": "single",
+  "pipeline": [
+    {
+      "modifier": "blur",
+      "token": "blur_sigma2",
+      "params": {
+        "severity": 3
+      }
+    }
+  ],
+  "seed": 42,
+  "num_workers": 8
+}

@@ -1,8 +1,3 @@
-Dataset/CelebA/img_align_celeba
-Dataset/CelebA/main
-Dataset/CelebA/train
-Dataset/CelebA/val
-Dataset/CelebA/identity_CelebA.txt
 Images/test0.jpeg
 Results/*
 !Results/compiled_results.csv
