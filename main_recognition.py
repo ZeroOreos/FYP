@@ -1,45 +1,110 @@
 #!/usr/bin/env python3
-# python3 main_recognition.py <dataset_dir> [--throttle] -> cached recognition orchestration and result refresh
+# python3 main_recognition.py <dataset_dir> -> cached recognition orchestration and result refresh
 
+from __future__ import annotations
+
+import argparse
 import sys
 from pathlib import Path
 
-from Utility.pathfinder import resolve_dataset_context
-from Utility.pipeline_common import MODELS, MODEL_THROTTLE_DELAYS, PAIRS_ROOT, RESULTS_ROOT, THROTTLE_BATCH_SIZE
-from Utility.pipeline_common import ensure_dir, maybe_run_evaluate, maybe_run_generate, maybe_run_pairs
-from Utility.pipeline_common import pairs_output_path, validate_input_dataset, validate_model_registry
-from Utility.results_compile import rebuild_compiled_csv, rebuild_parsed_results
+from Shared.paths import derive_pairs_output_path, resolve_dataset_context
+from Shared.results_compile import rebuild_compiled_csv, rebuild_parsed_results
+from Shared.runtime import ALLOW_MISSING_PAIRS, MODELS, PAIRS_ROOT, PROJECT_ROOT, RESULTS_ROOT
+from Shared.runtime import THROTTLE_BATCH_SIZE, MODEL_THROTTLE_DELAYS
+from Shared.runtime import ensure_dir, run_subprocess, validate_input_dataset, validate_model_registry
+
+
+PAIRS_SCRIPT = PROJECT_ROOT / "Recognition" / "pairs.py"
+VERIFY_SCRIPT = PROJECT_ROOT / "Recognition" / "evaluate.py"
+
+
+def parse_args() -> Path:
+    parser = argparse.ArgumentParser(description="Run cached recognition orchestration.")
+    parser.add_argument("dataset_dir", type=Path, help="Dataset root to evaluate.")
+    return parser.parse_args().dataset_dir.resolve()
+
+
+def embeddings_output_path(variant_name: str, model_name: str) -> Path:
+    return RESULTS_ROOT / variant_name / model_name / "embeddings.npz"
+
+
+def metrics_output_path(variant_name: str, model_name: str) -> Path:
+    return RESULTS_ROOT / variant_name / model_name / "metrics.json"
+
+
+def maybe_run_pairs(dataset_dir: Path) -> Path:
+    pairs_file = derive_pairs_output_path(dataset_dir)
+    ensure_dir(PAIRS_ROOT)
+    if pairs_file.exists():
+        return pairs_file
+
+    run_subprocess(
+        [sys.executable, str(PAIRS_SCRIPT), str(dataset_dir), "--pairs-out", str(pairs_file)],
+        f"pairs.py -> {pairs_file}",
+    )
+    return pairs_file
+
+
+def maybe_run_generate(dataset_dir: Path, variant_name: str, model: dict[str, Path], throttle: bool = False) -> Path:
+    embeddings_file = embeddings_output_path(variant_name, model["name"])
+    ensure_dir(embeddings_file.parent)
+    if embeddings_file.exists():
+        print(f"[SKIP] {model['name']} embeddings exist")
+        return embeddings_file
+
+    cmd = [sys.executable, str(model["generate_script"]), str(dataset_dir), str(embeddings_file)]
+    if throttle:
+        delay = MODEL_THROTTLE_DELAYS.get(model["name"], 0.0)
+        if model["name"] == "FaceNet":
+            cmd.extend([str(THROTTLE_BATCH_SIZE), str(delay)])
+        elif model["name"] == "InsightFace":
+            cmd.append(str(delay))
+
+    run_subprocess(cmd, f"{model['name']} generate -> {embeddings_file}")
+    return embeddings_file
+
+
+def maybe_run_evaluate(variant_name: str, model: dict[str, Path], pairs_file: Path, embeddings_file: Path) -> Path:
+    metrics_file = metrics_output_path(variant_name, model["name"])
+    ensure_dir(metrics_file.parent)
+    if metrics_file.exists():
+        print(f"[SKIP] {model['name']} metrics exist")
+        return metrics_file
+
+    cmd = [
+        sys.executable,
+        str(VERIFY_SCRIPT),
+        str(pairs_file),
+        str(embeddings_file),
+        str(metrics_file),
+        "--model-name",
+        model["name"],
+    ]
+    if ALLOW_MISSING_PAIRS:
+        cmd.append("--allow-missing-pairs")
+
+    run_subprocess(cmd, f"{model['name']} evaluate -> {metrics_file}")
+    return metrics_file
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("Usage: python3 main_recognition.py <dataset_dir> [--throttle]")
-        sys.exit(1)
-
-    dataset_dir = Path(sys.argv[1]).resolve()
+    dataset_dir = parse_args()
     validate_input_dataset(dataset_dir)
     validate_model_registry(MODELS)
 
-    throttle_enabled = "--throttle" in sys.argv
     context = resolve_dataset_context(dataset_dir)
-
-    if throttle_enabled:
-        delays_str = ", ".join([f"{k}={v}s" for k, v in MODEL_THROTTLE_DELAYS.items()])
-        print(f"[INFO] Throttling enabled: batch_size={THROTTLE_BATCH_SIZE}, delays=[{delays_str}]")
-
     print(f"[INFO] Variant: {context.variant_name}")
     print(f"[INFO] Referenced base root: {context.base_root_name}")
-    print(f"[INFO] Shared pair file: {pairs_output_path(dataset_dir)}")
+    print(f"[INFO] Shared pair file: {derive_pairs_output_path(dataset_dir)}")
 
     ensure_dir(PAIRS_ROOT)
     ensure_dir(RESULTS_ROOT)
 
     pairs_file = maybe_run_pairs(dataset_dir)
-
     for model in MODELS:
         print(f"\n===== MODEL: {model['name']} =====")
-        emb_file = maybe_run_generate(dataset_dir, context.variant_name, model, throttle_enabled)
-        maybe_run_evaluate(context.variant_name, model, pairs_file, emb_file)
+        embeddings_file = maybe_run_generate(dataset_dir, context.variant_name, model)
+        maybe_run_evaluate(context.variant_name, model, pairs_file, embeddings_file)
 
     rebuild_compiled_csv()
     rebuild_parsed_results()

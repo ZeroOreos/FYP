@@ -20,7 +20,7 @@
 - Flow: pairs -> embeddings -> verification metrics -> compiled results -> parsed tables
 - Reuse cached outputs when present
 - Model-specific scripts should generate embeddings only
-- Recognition evaluation should use one shared route via `Evaluators/verify.py`
+- Recognition evaluation should use one shared route via `Recognition/evaluate.py`
 
 ## Attack Pipeline
 - Input: clean gallery root plus attack method configuration
@@ -39,17 +39,17 @@
 - `Modifiers/preprocessing/`: corruption / degradation builders
 - `Modifiers/protection/`: privacy / anti-recognition image-level methods
 - `Modifiers/attack/`: face-swap / reenactment method wrappers
-- `Utility/pathfinder.py`: dataset naming / base-root / chain resolution
+- `Shared/paths.py`: dataset naming / base-root / chain resolution
+- `Shared/runtime.py`: shared paths, subprocess helpers, and model registry
+- `Shared/slowed.py`: slowed-process orchestration helpers
+- `Shared/results_compile.py`: compiled / parsed result rebuild helpers
+- `Shared/results_parse.py`: readable result-table generation from `compiled_results.csv`
 - `Utility/modify.py`: non-adversarial dataset materialization implementation
-- `Utility/attack.py`: adversarial dataset materialization implementation and attack metadata writer
-- `Utility/pipeline_common.py`: shared cached pairs / embeddings / metrics orchestration helpers
-- `Utility/attack_pipeline.py`: shared cached attack-pair / probe-build / attack-metrics orchestration helpers
-- `Utility/pairs.py`: clean pair generation helpers
-- `Utility/results_compile.py`: compiled / parsed result rebuild helpers
-- `Utility/results_parse.py`: readable result-table generation from `compiled_results.csv`
-- `Utility/attack_pair.py`: hard / semi-hard attack pair generation from embeddings
-- `Evaluators/verify.py`: shared clean / corruption / protection verification evaluator
-- `Evaluators/attack.py`: shared impersonation / attack-success evaluator
+- `Recognition/pairs.py`: clean pair generation helpers
+- `Recognition/evaluate.py`: shared clean / corruption / protection verification evaluator
+- `Attack/materialize.py`: adversarial dataset materialization implementation and attack metadata writer
+- `Attack/pairs.py`: hard / semi-hard attack pair generation from embeddings
+- `Attack/evaluate.py`: shared impersonation / attack-success evaluator
 - `Models/<Model>/generate.py`: dataset root -> embeddings
 
 ## Dataset
@@ -81,15 +81,14 @@
 - Full per-sample manifests are not required by default
 
 ## Attack Metadata
-- Every attack root must include a compact JSON metadata file written by `Utility/attack.py`
-- The JSON is a derivation record, not a full semantic restatement of every sample
+- Every attack root must include a compact JSON metadata file written by `Attack/materialize.py`
+- The JSON is a small derivation record, not a method catalog or full semantic restatement of every sample
 - Required dataset-level fields:
 - `input_dataset_dir`
 - `output_dataset_dir`
 - `base_dataset`
 - `referenced_base_root`
 - `variant_name`
-- `attack_family`
 - `attack_method`
 - `generator`
 - `seed`
@@ -119,7 +118,7 @@
 - Do not add a separate reproducibility utility just for this check; perform the comparison inside the relevant materialization path
 
 ## Attack Pairing
-- `Utility/attack_pair.py` input: embeddings file or model result directory
+- `Attack/pairs.py` input: embeddings file or model result directory
 - Output: `<variant>_<model>_atkpairs.npz` and `.json`
 - Pairing basis: identity centroid cosine similarity, then image cosine similarity
 - Prefer similar non-matching identities to maximize realistic impersonation pressure
@@ -141,8 +140,9 @@
 - Morphing:
 - `mipgan`: representative GAN-based morphing baseline
 - `mordiff`: representative diffusion-based morphing baseline
-- These methods should be registered under `Modifiers/attack/`
-- Methods may still rely on external backends or generator scripts even when the registry entry exists
+- Keep method names simple and stable at the CLI / path level
+- Avoid a heavy per-method spec layer unless the pipeline genuinely needs it
+- Methods may still rely on external backends or generator scripts
 
 ## Gallery / Probe
 - Recognition mode may still use one dataset root symmetrically
@@ -163,7 +163,7 @@
 - Output root stays under the same dataset parent
 - `modifier.py` is a wrapper entry point only
 - Non-adversarial steps dispatch to `Utility/modify.py`
-- Adversarial / pair-driven steps dispatch to `Utility/attack.py`
+- Adversarial / pair-driven steps dispatch to `Attack/materialize.py`
 - Optional `--pair-input` restricts work to referenced images or pairs, depending on mode
 - If derived root already exists, warn and skip unless `--force`
 - Reject exact duplicate transform tokens already present in the input chain
@@ -180,8 +180,8 @@
 - Models should not own their own verification logic when they emit standard embeddings
 
 ## Evaluators
-- `Evaluators/verify.py`: `<pairs_file> <embeddings_file> <metrics_out>` -> verification metrics for all embedding backbones
-- `Evaluators/attack.py`: `<gallery_embeddings> <probe_embeddings> <attack_metadata_json> <metrics_out>` -> attack metrics for all embedding backbones
+- `Recognition/evaluate.py`: `<pairs_file> <embeddings_file> <metrics_out>` -> verification metrics for all embedding backbones
+- `Attack/evaluate.py`: `<gallery_embeddings> <probe_embeddings> <attack_metadata_json> <metrics_out>` -> attack metrics for all embedding backbones
 - Attack evaluation must report requested samples, scored samples, failed samples, and skipped samples
 - Attack metrics should include:
 - `attack_success_rate`
@@ -219,11 +219,13 @@
 
 ## Design Rules
 - recognition / attack orchestration is split into `main_recognition.py` and `main_attack.py`
-- shared orchestration and result rebuild code should live in `Utility/`, not inside either main
+- domain pipeline code should live under `Recognition/` and `Attack/`
+- reusable helpers should live under `Shared/`
 - slowed orchestration is split into `slowed/main_recognition_slowed.py` and `slowed/main_attack_slowed.py`
 - Attack evaluation must become a first-class pipeline, not a small add-on to recognition evaluation
 - Attack studies should report attack-specific thresholded and difficulty-aware metrics, not only balanced pairwise verification accuracy
 - Filesystem semantics should be primary for attack datasets; metadata should supplement only what cannot be safely inferred
+- Prefer lean method tokens and path-driven semantics over duplicated spec metadata
 
 ## Keep
 - Existing embedding generators

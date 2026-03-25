@@ -16,20 +16,13 @@ from typing import Any, Callable, Optional
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 
-from Modifiers.preprocessing import (
-    BrightnessShift,
-    ContrastShift,
-    EyeBandOcclusion,
-    FaceMaskOcclusion,
-    GammaShift,
-    GaussianBlur,
-    JPEGCompression,
-    MotionBlur,
-    RandomBlockOcclusion,
-    ResolutionResampling,
-    RotationMisalignment,
-)
-from Utility.pathfinder import resolve_dataset_context
+from Modifiers.preprocessing.blur import GaussianBlur, MotionBlur
+from Modifiers.preprocessing.compression import JPEGCompression
+from Modifiers.preprocessing.geometry import RotationMisalignment
+from Modifiers.preprocessing.illumination import BrightnessShift, ContrastShift, GammaShift
+from Modifiers.preprocessing.occlusion import EyeBandOcclusion, FaceMaskOcclusion, RandomBlockOcclusion
+from Modifiers.preprocessing.resampling import ResolutionResampling
+from Shared.paths import resolve_dataset_context
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# python3 modifier.py <dataset_dir> --step <spec> [--step ...] -> wrapper around Utility/modify.py and Utility/attack.py
+# python3 modifier.py <dataset_dir> --step <spec> [--step ...] -> wrapper around Utility/modify.py and Attack/materialize.py
 
 from __future__ import annotations
 
@@ -8,13 +8,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from Utility.attack import ATTACK_REGISTRY
+from Attack.materialize import ATTACK_METHODS
 from Utility.modify import REGISTRY as MODIFY_REGISTRY
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 MODIFY_SCRIPT = PROJECT_ROOT / "Utility" / "modify.py"
-ATTACK_SCRIPT = PROJECT_ROOT / "Utility" / "attack.py"
+ATTACK_SCRIPT = PROJECT_ROOT / "Attack" / "materialize.py"
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,7 +44,7 @@ def is_modify_mode(steps: list[str], generator_script: str | None) -> bool:
 def validate_attack_steps(steps: list[str]) -> None:
     for raw in steps:
         name = raw.split(":", 1)[0].strip()
-        if name not in ATTACK_REGISTRY:
+        if name not in ATTACK_METHODS:
             raise ValueError(f"unknown attack method '{name}'")
 
 

@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATASET_ROOT = PROJECT_ROOT / "Dataset"
 RESULTS_ROOT = PROJECT_ROOT / "Results"
 COMPILED_CSV = RESULTS_ROOT / "compiled_results.csv"
-RESULTS_PARSE_SCRIPT = PROJECT_ROOT / "Utility" / "results_parse.py"
+RESULTS_PARSE_SCRIPT = PROJECT_ROOT / "Shared" / "results_parse.py"
 
 
 def ensure_dir(path: Path) -> None:

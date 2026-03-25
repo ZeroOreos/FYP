@@ -1,15 +1,23 @@
-# python3 Utility/pairs.py <dataset_dir> -> pair data and pair-file helpers
+# python3 Recognition/pairs.py <dataset_dir> -> pair data and pair-file helpers
 import argparse
 import hashlib
 import itertools
 import json
 import platform
 import random
+import sys
 from pathlib import Path
 
 import numpy as np
 
-from Utility.pathfinder import derive_pairs_output_path, resolve_dataset_context
+
+if __package__ is None or __package__ == "":
+    project_root = Path(__file__).resolve().parent.parent
+    project_root_str = str(project_root)
+    if project_root_str not in sys.path:
+        sys.path.insert(0, project_root_str)
+
+from Shared.paths import derive_pairs_output_path, resolve_dataset_context
 
 
 VALID_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}

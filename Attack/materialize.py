@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-# python3 Utility/attack.py <dataset_dir> --step <attack_spec> --pair-input <atkpairs> --generator-script <script> -> attacked probe dataset + compact metadata
+# python3 Attack/materialize.py <dataset_dir> --step <attack_spec> --pair-input <atkpairs> --generator-script <script> -> attacked probe dataset + compact metadata
 
 from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,27 +12,20 @@ from typing import Any
 
 import numpy as np
 
-from Modifiers.attack.advfacegan import SPEC as ADVFACEGAN_SPEC
-from Modifiers.attack.faceshifter import SPEC as FACESHIFTER_SPEC
-from Modifiers.attack.fomm import SPEC as FOMM_SPEC
-from Modifiers.attack.liveportrait import SPEC as LIVEPORTRAIT_SPEC
-from Modifiers.attack.mipgan import SPEC as MIPGAN_SPEC
-from Modifiers.attack.mordiff import SPEC as MORDIFF_SPEC
-from Modifiers.attack.simswap import SPEC as SIMSWAP_SPEC
-from Utility.pathfinder import resolve_dataset_context
+from Shared.paths import resolve_dataset_context
+from Shared.runtime import run_subprocess
 
 
 METADATA_FILENAME = "attack_metadata.json"
-ATTACK_SPECS = (
-    SIMSWAP_SPEC,
-    FACESHIFTER_SPEC,
-    FOMM_SPEC,
-    LIVEPORTRAIT_SPEC,
-    ADVFACEGAN_SPEC,
-    MIPGAN_SPEC,
-    MORDIFF_SPEC,
-)
-ATTACK_REGISTRY = {spec["name"]: spec for spec in ATTACK_SPECS}
+ATTACK_METHODS = {
+    "advfacegan",
+    "faceshifter",
+    "fomm",
+    "liveportrait",
+    "mipgan",
+    "mordiff",
+    "simswap",
+}
 
 
 @dataclass(frozen=True)
@@ -55,21 +47,16 @@ def parse_scalar(value: str) -> Any:
         return value
 
 
-def _format_token_value(value: Any) -> str:
-    text = str(value)
-    return text.replace("-", "m").replace(".", "p")
+def format_token_value(value: Any) -> str:
+    return str(value).replace("-", "m").replace(".", "p")
 
 
 def parse_attack_step(raw: str) -> AttackStep:
-    if ":" in raw:
-        name, raw_params = raw.split(":", 1)
-    else:
-        name, raw_params = raw, ""
-
+    name, _, raw_params = raw.partition(":")
     name = name.strip()
     if not name:
         raise ValueError("attack step name cannot be empty")
-    if name not in ATTACK_REGISTRY:
+    if name not in ATTACK_METHODS:
         raise ValueError(f"unknown attack method '{name}'")
 
     params: dict[str, Any] = {}
@@ -85,7 +72,7 @@ def parse_attack_step(raw: str) -> AttackStep:
 
     token = name
     if params:
-        suffix = "_".join(f"{key}{_format_token_value(params[key])}" for key in sorted(params))
+        suffix = "_".join(f"{key}{format_token_value(params[key])}" for key in sorted(params))
         token = f"{name}_{suffix}"
     return AttackStep(name=name, params=params, token=token)
 
@@ -95,8 +82,7 @@ def derive_output_variant_name(dataset_dir: Path, step: AttackStep) -> str:
     existing_tokens: list[str] = []
     if context.variant_name != context.base_root_name and context.transform_chain != "clean":
         existing_tokens.extend(token for token in context.transform_chain.split("__") if token)
-    tokens = [step.token] + existing_tokens
-    return f"{'__'.join(tokens)}_{context.base_root_name}"
+    return f"{'__'.join([step.token, *existing_tokens])}_{context.base_root_name}"
 
 
 def derive_output_dataset_dir(dataset_dir: Path, step: AttackStep) -> Path:
@@ -115,33 +101,24 @@ def load_attack_pairs(pair_input: Path) -> list[dict[str, str]]:
     if missing:
         raise ValueError(f"attack pair input missing required keys {missing}: {pair_input}")
 
-    victim_identity = [str(value) for value in data["victim_identity"].tolist()]
-    attacker_identity = [str(value) for value in data["attacker_identity"].tolist()]
-    victim_image = [str(value) for value in data["victim_image"].tolist()]
-    attacker_image = [str(value) for value in data["attacker_image"].tolist()]
-
     rows: list[dict[str, str]] = []
     for victim_id, attacker_id, victim_img, attacker_img in zip(
-        victim_identity,
-        attacker_identity,
-        victim_image,
-        attacker_image,
+        data["victim_identity"].tolist(),
+        data["attacker_identity"].tolist(),
+        data["victim_image"].tolist(),
+        data["attacker_image"].tolist(),
     ):
         rows.append({
-            "victim_identity": victim_id,
-            "attacker_identity": attacker_id,
-            "victim_image": victim_img,
-            "attacker_image": attacker_img,
+            "victim_identity": str(victim_id),
+            "attacker_identity": str(attacker_id),
+            "victim_image": str(victim_img),
+            "attacker_image": str(attacker_img),
         })
     return rows
 
 
 def expected_output_path(output_dir: Path, row: dict[str, str]) -> Path:
     return output_dir / row["victim_identity"] / Path(row["attacker_image"]).name
-
-
-def infer_attack_family(step_name: str) -> str:
-    return ATTACK_REGISTRY[step_name].family
 
 
 def build_request_metadata(
@@ -159,12 +136,7 @@ def build_request_metadata(
         "base_dataset": context.base_dataset_name,
         "referenced_base_root": context.base_root_name,
         "variant_name": output_dir.name,
-        "attack_family": infer_attack_family(step.name),
         "attack_method": step.name,
-        "attack_category": ATTACK_REGISTRY[step.name].category,
-        "paper_title": ATTACK_REGISTRY[step.name].paper_title,
-        "paper_url": ATTACK_REGISTRY[step.name].paper_url,
-        "code_url": ATTACK_REGISTRY[step.name].code_url,
         "generator": str(generator_script.resolve()),
         "seed": seed,
         "pair_input": str(pair_input.resolve()),
@@ -179,26 +151,21 @@ def build_request_metadata(
 def compare_existing_metadata(existing_path: Path, expected: dict[str, Any]) -> bool:
     with open(existing_path, "r", encoding="utf-8") as handle:
         existing = json.load(handle)
-    for key, value in expected.items():
-        if existing.get(key) != value:
-            return False
-    return True
+    return all(existing.get(key) == value for key, value in expected.items())
 
 
 def run_generator(dataset_dir: Path, pair_input: Path, output_dir: Path, generator_script: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    temp_records = output_dir / "_generator_records.json"
+    records_path = output_dir / "_generator_records.json"
     cmd = [
         sys.executable,
         str(generator_script),
         str(dataset_dir),
         str(pair_input),
         str(output_dir),
-        str(temp_records),
+        str(records_path),
     ]
-    print("\n[RUN] attack generator")
-    print("[CMD]", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    run_subprocess(cmd, f"attack generator -> {output_dir}")
 
 
 def materialize_attack_dataset(

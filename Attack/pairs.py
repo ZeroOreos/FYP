@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# python3 Utility/attack_pair.py <embeddings_src> [options] -> <variant>_<model>_atkpairs.npz/.json beside embeddings
+# python3 Attack/pairs.py <embeddings_src> [options] -> <variant>_<model>_atkpairs.npz/.json beside embeddings
 
 from __future__ import annotations
 
