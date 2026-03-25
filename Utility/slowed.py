@@ -10,8 +10,14 @@ import sys
 import time
 from collections import deque
 from pathlib import Path
+from typing import Any
 
 import psutil
+
+
+def add_runner_args(parser: argparse.ArgumentParser, *, default_python: str) -> None:
+    parser.add_argument("--main-script", type=Path, default=None, help="Path to the main pipeline script.")
+    parser.add_argument("--python-bin", type=str, default=default_python, help="Python interpreter to use.")
 
 
 def add_pause_args(parser: argparse.ArgumentParser) -> None:
@@ -58,9 +64,9 @@ def add_pause_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dry-run", action="store_true", help="Print the command and settings without running it.")
 
 
-def resolve_main_script(path_arg: str | None, default_filename: str) -> Path:
+def resolve_main_script(path_arg: Path | None, default_filename: str) -> Path:
     if path_arg:
-        main_path = Path(path_arg).expanduser().resolve()
+        main_path = path_arg.expanduser().resolve()
     else:
         main_path = (Path(__file__).resolve().parent.parent / default_filename).resolve()
     if not main_path.exists():
@@ -68,8 +74,9 @@ def resolve_main_script(path_arg: str | None, default_filename: str) -> Path:
     return main_path
 
 
-def validate_input_dir(input_dir: str) -> Path:
-    path = Path(input_dir).expanduser().resolve()
+def validate_input_dir(input_dir: Path | str) -> Path:
+    path = input_dir if isinstance(input_dir, Path) else Path(input_dir)
+    path = path.expanduser().resolve()
     if not path.exists():
         raise FileNotFoundError(f"Input directory not found: {path}")
     if not path.is_dir():
@@ -77,28 +84,24 @@ def validate_input_dir(input_dir: str) -> Path:
     return path
 
 
-def stop_process_tree(proc: psutil.Process) -> None:
+def _signal_process_tree(proc: psutil.Process, sig: Any) -> None:
     try:
-        proc.send_signal(signal.SIGSTOP)
+        proc.send_signal(sig)
     except psutil.NoSuchProcess:
         return
     for child in proc.children(recursive=True):
         try:
-            child.send_signal(signal.SIGSTOP)
+            child.send_signal(sig)
         except psutil.NoSuchProcess:
             pass
+
+
+def stop_process_tree(proc: psutil.Process) -> None:
+    _signal_process_tree(proc, signal.SIGSTOP)
 
 
 def continue_process_tree(proc: psutil.Process) -> None:
-    try:
-        proc.send_signal(signal.SIGCONT)
-    except psutil.NoSuchProcess:
-        return
-    for child in proc.children(recursive=True):
-        try:
-            child.send_signal(signal.SIGCONT)
-        except psutil.NoSuchProcess:
-            pass
+    _signal_process_tree(proc, signal.SIGCONT)
 
 
 def proc_cmdline(proc: psutil.Process) -> str:
@@ -174,6 +177,13 @@ def print_pause_plan(cmd: list[str], args: argparse.Namespace) -> None:
     print(f"[INFO] Stage-aware pause:{not args.pause_all_stages}")
     print(f"[INFO] Section cooldown: {not args.disable_section_cooldown} ({args.inter_section_cooldown_seconds}s)")
     print(f"[INFO] Command:          {' '.join(cmd)}")
+
+
+def print_run_header(title: str, input_label: str, input_dir: Path, main_script: Path, python_bin: str) -> None:
+    print(f"[INFO] === {title} ===")
+    print(f"[INFO] {input_label:<16} {input_dir}")
+    print(f"[INFO] Main script:      {main_script}")
+    print(f"[INFO] Python binary:    {python_bin}")
 
 
 def run_paused_subprocess(cmd: list[str], args: argparse.Namespace, *, main_label: str) -> int:
