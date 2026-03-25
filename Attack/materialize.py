@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,11 +11,11 @@ from typing import Any
 
 import numpy as np
 
+from Attack.metadata import build_request_metadata, metadata_path, request_matches, write_attack_metadata
 from Utility.paths import resolve_dataset_context
 from Utility.runtime import run_subprocess
 
 
-METADATA_FILENAME = "attack_metadata.json"
 ATTACK_METHODS = {
     "advfacegan",
     "faceshifter",
@@ -90,10 +89,6 @@ def derive_output_dataset_dir(dataset_dir: Path, step: AttackStep) -> Path:
     return context.dataset_root.joinpath(*context.dataset_relative_parts[:-1], derive_output_variant_name(dataset_dir, step))
 
 
-def metadata_path(output_dir: Path) -> Path:
-    return output_dir / METADATA_FILENAME
-
-
 def load_attack_pairs(pair_input: Path) -> list[dict[str, str]]:
     data = np.load(pair_input, allow_pickle=True)
     required = ("victim_identity", "attacker_identity", "victim_image", "attacker_image")
@@ -101,57 +96,24 @@ def load_attack_pairs(pair_input: Path) -> list[dict[str, str]]:
     if missing:
         raise ValueError(f"attack pair input missing required keys {missing}: {pair_input}")
 
-    rows: list[dict[str, str]] = []
-    for victim_id, attacker_id, victim_img, attacker_img in zip(
-        data["victim_identity"].tolist(),
-        data["attacker_identity"].tolist(),
-        data["victim_image"].tolist(),
-        data["attacker_image"].tolist(),
-    ):
-        rows.append({
+    return [
+        {
             "victim_identity": str(victim_id),
             "attacker_identity": str(attacker_id),
             "victim_image": str(victim_img),
             "attacker_image": str(attacker_img),
-        })
-    return rows
+        }
+        for victim_id, attacker_id, victim_img, attacker_img in zip(
+            data["victim_identity"].tolist(),
+            data["attacker_identity"].tolist(),
+            data["victim_image"].tolist(),
+            data["attacker_image"].tolist(),
+        )
+    ]
 
 
 def expected_output_path(output_dir: Path, row: dict[str, str]) -> Path:
     return output_dir / row["victim_identity"] / Path(row["attacker_image"]).name
-
-
-def build_request_metadata(
-    dataset_dir: Path,
-    output_dir: Path,
-    step: AttackStep,
-    pair_input: Path,
-    generator_script: Path,
-    seed: int,
-) -> dict[str, Any]:
-    context = resolve_dataset_context(dataset_dir)
-    return {
-        "input_dataset_dir": str(dataset_dir.resolve()),
-        "output_dataset_dir": str(output_dir.resolve()),
-        "base_dataset": context.base_dataset_name,
-        "referenced_base_root": context.base_root_name,
-        "variant_name": output_dir.name,
-        "attack_method": step.name,
-        "generator": str(generator_script.resolve()),
-        "seed": seed,
-        "pair_input": str(pair_input.resolve()),
-        "generator_params": step.params,
-        "folder_identity_rule": "folder name is victim / claimed identity",
-        "filename_rule": "output filename preserves attacker/source filename",
-        "attacker_resolution_rule": "resolve attacker from pair file and preserved filename",
-        "path_semantics_are_primary": True,
-    }
-
-
-def compare_existing_metadata(existing_path: Path, expected: dict[str, Any]) -> bool:
-    with open(existing_path, "r", encoding="utf-8") as handle:
-        existing = json.load(handle)
-    return all(existing.get(key) == value for key, value in expected.items())
 
 
 def run_generator(dataset_dir: Path, pair_input: Path, output_dir: Path, generator_script: Path) -> None:
@@ -186,7 +148,7 @@ def materialize_attack_dataset(
             raise RuntimeError(
                 f"attack output state is incomplete; expected both dataset dir and metadata: {output_dir} / {meta_path}"
             )
-        if compare_existing_metadata(meta_path, expected_request):
+        if request_matches(meta_path, expected_request):
             print(f"[SKIP] attack dataset already matches request: {output_dir}")
             return meta_path
         if not force:
@@ -214,15 +176,7 @@ def materialize_attack_dataset(
             "error": "expected generated output was not found after generator completed",
         })
 
-    metadata = {
-        **expected_request,
-        "num_requested_pairs": len(pair_rows),
-        "num_written": num_written,
-        "num_failed": len(failures),
-        "failures": failures,
-    }
-    with open(meta_path, "w", encoding="utf-8") as handle:
-        json.dump(metadata, handle, indent=2)
+    write_attack_metadata(meta_path, expected_request, len(pair_rows), num_written, failures)
 
     print(f"[INFO] attack output: {output_dir}")
     print(f"[INFO] metadata: {meta_path}")
@@ -234,14 +188,20 @@ def materialize_attack_dataset(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Materialize an attack probe dataset from attack pairs.")
-    parser.add_argument("dataset_dir", type=str)
+    parser.add_argument("dataset_dir", type=Path)
     parser.add_argument("--step", action="append", required=True)
-    parser.add_argument("--pair-input", type=str, required=True)
-    parser.add_argument("--generator-script", type=str, required=True)
+    parser.add_argument("--pair-input", type=Path, required=True)
+    parser.add_argument("--generator-script", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--force", action="store_true")
-    parser.add_argument("--output-dir", type=str, default=None)
-    return parser.parse_args()
+    parser.add_argument("--output-dir", type=Path, default=None)
+    args = parser.parse_args()
+    args.dataset_dir = args.dataset_dir.resolve()
+    args.pair_input = args.pair_input.resolve()
+    args.generator_script = args.generator_script.resolve()
+    if args.output_dir is not None:
+        args.output_dir = args.output_dir.resolve()
+    return args
 
 
 def main() -> None:
@@ -249,9 +209,9 @@ def main() -> None:
     if len(args.step) != 1:
         raise ValueError("attack materialization currently expects exactly one attack step per run")
 
-    dataset_dir = Path(args.dataset_dir).resolve()
-    pair_input = Path(args.pair_input).resolve()
-    generator_script = Path(args.generator_script).resolve()
+    dataset_dir = args.dataset_dir
+    pair_input = args.pair_input
+    generator_script = args.generator_script
     step = parse_attack_step(args.step[0])
 
     if not dataset_dir.exists():
@@ -268,7 +228,7 @@ def main() -> None:
         generator_script=generator_script,
         seed=args.seed,
         force=bool(args.force),
-        output_dir_override=Path(args.output_dir).resolve() if args.output_dir else None,
+        output_dir_override=args.output_dir,
     )
 
 

@@ -131,22 +131,9 @@ def pairs_to_arrays(pairs):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Generate balanced face verification pairs."
-    )
-
-    parser.add_argument(
-        "dataset_dir",
-        type=str,
-        help="Path to dataset root (identity/image structure)."
-    )
-
-    parser.add_argument(
-        "--pairs-out",
-        type=str,
-        default=None,
-        help="Optional custom output path."
-    )
+    parser = argparse.ArgumentParser(description="Generate balanced face verification pairs.")
+    parser.add_argument("dataset_dir", type=Path, help="Path to dataset root (identity/image structure).")
+    parser.add_argument("--pairs-out", type=Path, default=None, help="Optional custom output path.")
 
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--repeats", type=int, default=DEFAULT_REPEATS)
@@ -155,7 +142,7 @@ def main():
 
     args = parser.parse_args()
 
-    dataset_dir = Path(args.dataset_dir).resolve()
+    dataset_dir = args.dataset_dir.resolve()
 
     if not dataset_dir.exists():
         raise FileNotFoundError(dataset_dir)
@@ -165,7 +152,7 @@ def main():
     if args.pairs_out is None:
         pairs_out = derive_pairs_output_path(dataset_dir)
     else:
-        pairs_out = Path(args.pairs_out).resolve()
+        pairs_out = args.pairs_out.resolve()
 
     print(f"[INFO] Dataset: {dataset_dir}")
     print(f"[INFO] Variant root: {context.variant_name}")

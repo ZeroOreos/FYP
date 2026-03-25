@@ -4,11 +4,11 @@
 
 from __future__ import annotations
 
+import argparse
 import concurrent.futures
 import hashlib
 import json
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -22,10 +22,10 @@ from Modifiers.preprocessing.geometry import RotationMisalignment
 from Modifiers.preprocessing.illumination import BrightnessShift, ContrastShift, GammaShift
 from Modifiers.preprocessing.occlusion import EyeBandOcclusion, FaceMaskOcclusion, RandomBlockOcclusion
 from Modifiers.preprocessing.resampling import ResolutionResampling
+from Recognition.metadata import build_transform_metadata, metadata_path, request_matches, write_transform_metadata
 from Utility.paths import resolve_dataset_context
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
 VALID_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 MAX_INFLIGHT_MULTIPLIER = 4
 
@@ -165,17 +165,6 @@ class Job:
     relative_path: str
 
 
-@dataclass
-class Args:
-    dataset_dir: Path
-    step: list[str]
-    seed: int = 42
-    num_workers: int = max(1, (os.cpu_count() or 4) - 1)
-    pair_input: Path | None = None
-    overwrite: bool = False
-    force: bool = False
-
-
 def parse_scalar(value: str) -> Any:
     lowered = value.strip().lower()
     if lowered in {"true", "false"}:
@@ -220,36 +209,14 @@ def parse_step_spec(raw: str) -> StepConfig:
     return StepConfig(spec_name=name, params=params, token=token)
 
 
-def build_modifier(step: StepConfig, base_seed: int) -> Any:
-    spec = REGISTRY[step.spec_name]
-    kwargs = dict(step.params)
-    kwargs.setdefault("seed", base_seed)
-    return spec.factory(**kwargs)
-
-
-def derive_output_variant_name(dataset_dir: Path, steps: list[StepConfig]) -> str:
+def derive_output_dataset_dir(dataset_dir: Path, steps: list[StepConfig]) -> Path:
     context = resolve_dataset_context(dataset_dir)
-    existing_tokens: list[str] = []
-    if context.variant_name != context.base_root_name:
-        if context.transform_chain != "clean":
-            existing_tokens.extend(token for token in context.transform_chain.split("__") if token)
-    new_tokens = [step.token for step in steps]
-    tokens = list(reversed(new_tokens)) + existing_tokens
-    if not tokens:
-        raise ValueError("at least one modifier step is required")
-    return f"{'__'.join(tokens)}_{context.base_root_name}"
-
-
-def existing_transform_tokens(dataset_dir: Path) -> list[str]:
-    context = resolve_dataset_context(dataset_dir)
-    if context.variant_name == context.base_root_name or context.transform_chain == "clean":
-        return []
-    return [token for token in context.transform_chain.split("__") if token]
-
-
-def validate_step_uniqueness(dataset_dir: Path, steps: list[StepConfig]) -> None:
-    existing = set(existing_transform_tokens(dataset_dir))
     requested = [step.token for step in steps]
+    existing = (
+        []
+        if context.variant_name == context.base_root_name or context.transform_chain == "clean"
+        else [token for token in context.transform_chain.split("__") if token]
+    )
     duplicate_existing = [token for token in requested if token in existing]
     if duplicate_existing:
         raise ValueError(
@@ -269,45 +236,38 @@ def validate_step_uniqueness(dataset_dir: Path, steps: list[StepConfig]) -> None
             + ", ".join(duplicate_requested)
         )
 
-
-def derive_output_dataset_dir(dataset_dir: Path, steps: list[StepConfig]) -> Path:
-    context = resolve_dataset_context(dataset_dir)
-    output_variant_name = derive_output_variant_name(dataset_dir, steps)
-    return context.dataset_root.joinpath(*context.dataset_relative_parts[:-1], output_variant_name)
+    variant_tokens = list(reversed(requested)) + existing
+    variant_name = f"{'__'.join(variant_tokens)}_{context.base_root_name}"
+    return context.dataset_root.joinpath(*context.dataset_relative_parts[:-1], variant_name)
 
 
-def collect_jobs(dataset_dir: Path, output_dir: Path) -> list[Job]:
+def build_job(dataset_dir: Path, output_dir: Path, src_path: Path) -> Job:
+    relative = src_path.relative_to(dataset_dir)
+    return Job(
+        src_path=src_path,
+        dst_path=output_dir / relative,
+        relative_path=relative.as_posix(),
+    )
+
+
+def collect_jobs(dataset_dir: Path, output_dir: Path, pair_input: Optional[Path]) -> list[Job]:
     jobs: list[Job] = []
-    for src_path in sorted(dataset_dir.rglob("*")):
-        if not src_path.is_file():
-            continue
-        if src_path.suffix.lower() not in VALID_EXTS:
-            continue
-        relative = src_path.relative_to(dataset_dir)
-        jobs.append(
-            Job(
-                src_path=src_path,
-                dst_path=output_dir / relative,
-                relative_path=relative.as_posix(),
-            )
-        )
-    if not jobs:
-        raise RuntimeError(f"no valid images found under {dataset_dir}")
-    return jobs
+    if pair_input is None:
+        for src_path in sorted(dataset_dir.rglob("*")):
+            if src_path.is_file() and src_path.suffix.lower() in VALID_EXTS:
+                jobs.append(build_job(dataset_dir, output_dir, src_path))
+        if not jobs:
+            raise RuntimeError(f"no valid images found under {dataset_dir}")
+        return jobs
 
-
-def collect_jobs_from_pair_input(dataset_dir: Path, output_dir: Path, pair_input: Path) -> list[Job]:
     data = np.load(pair_input, allow_pickle=True)
-    candidate_keys = ["victim_image", "target_image", "image_paths"]
-    image_list = None
-    for key in candidate_keys:
-        if key in data.files:
-            image_list = [str(value) for value in data[key].tolist()]
-            break
+    image_list = next(
+        ([str(value) for value in data[key].tolist()] for key in ("victim_image", "target_image", "image_paths") if key in data.files),
+        None,
+    )
     if image_list is None:
         raise ValueError(f"pair input does not contain a supported image path key: {pair_input}")
 
-    jobs: list[Job] = []
     seen: set[str] = set()
     for image_str in image_list:
         src_path = Path(image_str)
@@ -315,17 +275,11 @@ def collect_jobs_from_pair_input(dataset_dir: Path, output_dir: Path, pair_input
             src_path = (dataset_dir / image_str).resolve()
         if not src_path.exists():
             continue
-        relative = src_path.relative_to(dataset_dir.resolve()).as_posix()
-        if relative in seen:
+        job = build_job(dataset_dir, output_dir, src_path)
+        if job.relative_path in seen:
             continue
-        seen.add(relative)
-        jobs.append(
-            Job(
-                src_path=src_path,
-                dst_path=output_dir / relative,
-                relative_path=relative,
-            )
-        )
+        seen.add(job.relative_path)
+        jobs.append(job)
     if not jobs:
         raise RuntimeError(f"no valid images resolved from pair input: {pair_input}")
     return jobs
@@ -351,7 +305,12 @@ def process_job(job: Job, steps: list[StepConfig], seed: int, overwrite: bool) -
 
     rng_seed = stable_image_seed(seed, job.relative_path)
     rng = np.random.default_rng(rng_seed)
-    modifiers = [build_modifier(step, base_seed=rng_seed) for step in steps]
+    modifiers = []
+    for step in steps:
+        spec = REGISTRY[step.spec_name]
+        kwargs = dict(step.params)
+        kwargs.setdefault("seed", rng_seed)
+        modifiers.append(spec.factory(**kwargs))
 
     try:
         with Image.open(job.src_path) as image:
@@ -371,50 +330,15 @@ def process_job(job: Job, steps: list[StepConfig], seed: int, overwrite: bool) -
     return "written", None
 
 
-def write_transform_metadata(dataset_dir: Path, output_dir: Path, steps: list[StepConfig], seed: int, num_workers: int) -> None:
-    metadata = build_transform_metadata(dataset_dir, output_dir, steps, seed, num_workers)
-    with open(output_dir / "transform.json", "w", encoding="utf-8") as handle:
-        json.dump(metadata, handle, indent=2)
-
-
-def build_transform_metadata(dataset_dir: Path, output_dir: Path, steps: list[StepConfig], seed: int, num_workers: int) -> dict[str, Any]:
-    context = resolve_dataset_context(dataset_dir)
-    return {
-        "input_dataset_dir": str(dataset_dir.resolve()),
-        "output_dataset_dir": str(output_dir.resolve()),
-        "base_dataset": context.base_dataset_name,
-        "referenced_base_root": context.base_root_name,
-        "variant_name": output_dir.name,
-        "variant_type": "single" if len(steps) == 1 and context.variant_type == "clean" else "hybrid",
-        "pipeline": [
-            {
-                "modifier": step.spec_name,
-                "token": step.token,
-                "params": step.params,
-            }
-            for step in steps
-        ],
-        "seed": seed,
-        "num_workers": num_workers,
-    }
-
-
-def metadata_matches_request(metadata_path: Path, expected: dict[str, Any]) -> bool:
-    with open(metadata_path, "r", encoding="utf-8") as handle:
-        existing = json.load(handle)
-    return existing == expected
-
-
 def materialize_dataset(
-    dataset_dir: Path,
     output_dir: Path,
+    metadata: dict[str, Any],
     steps: list[StepConfig],
     seed: int,
     num_workers: int,
     overwrite: bool,
-    pair_input: Optional[Path],
+    jobs: list[Job],
 ) -> None:
-    jobs = collect_jobs_from_pair_input(dataset_dir, output_dir, pair_input) if pair_input else collect_jobs(dataset_dir, output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     written = 0
@@ -470,7 +394,7 @@ def materialize_dataset(
             json.dump(failures, handle, indent=2)
         print(f"[WARN] {len(failures)} files failed; details in {failures_path}")
 
-    write_transform_metadata(dataset_dir, output_dir, steps, seed, num_workers)
+    write_transform_metadata(metadata_path(output_dir), metadata)
     print(f"[INFO] written: {written}")
     print(f"[INFO] skipped: {skipped}")
     print(f"[INFO] output: {output_dir}")
@@ -484,68 +408,53 @@ def validate_input_dataset(dataset_dir: Path) -> None:
     resolve_dataset_context(dataset_dir)
 
 
-def parse_args(argv: list[str]) -> Args:
-    if len(argv) < 2 or argv[1] in {"-h", "--help"}:
-        raise SystemExit(
-            "Usage: python3 Recognition/materialize.py <dataset_dir> --step <name[:k=v,...]> [--step ...] "
-            "[--seed <int>] [--num-workers <int>] [--pair-input <atkpairs>] [--overwrite] [--force]"
-        )
-
-    args = Args(dataset_dir=Path(argv[1]).resolve(), step=[])
-    index = 2
-    while index < len(argv):
-        token = argv[index]
-        if token == "--step":
-            index += 1
-            args.step.append(argv[index])
-        elif token == "--seed":
-            index += 1
-            args.seed = int(argv[index])
-        elif token == "--num-workers":
-            index += 1
-            args.num_workers = int(argv[index])
-        elif token == "--pair-input":
-            index += 1
-            args.pair_input = Path(argv[index]).resolve()
-        elif token == "--overwrite":
-            args.overwrite = True
-        elif token == "--force":
-            args.force = True
-        else:
-            raise SystemExit(f"Unknown argument: {token}")
-        index += 1
-
-    if not args.step:
-        raise SystemExit("Recognition/materialize.py requires at least one --step")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Materialize a named recognition-side dataset variant.")
+    parser.add_argument("dataset_dir", type=Path, help="Path to Dataset/<dataset>/<variant_root>.")
+    parser.add_argument(
+        "--step",
+        action="append",
+        required=True,
+        help="Modifier step like blur:severity=3 or jpeg:quality=30. Repeat to build hybrids.",
+    )
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--num-workers", type=int, default=max(1, (os.cpu_count() or 4) - 1))
+    parser.add_argument("--pair-input", type=Path, default=None, help="Optional pair-like input used to restrict images.")
+    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--force", action="store_true")
+    args = parser.parse_args()
+    args.dataset_dir = args.dataset_dir.resolve()
+    if args.pair_input is not None:
+        args.pair_input = args.pair_input.resolve()
     return args
 
 
 def main() -> None:
-    args = parse_args(sys.argv)
+    args = parse_args()
     dataset_dir = args.dataset_dir
     validate_input_dataset(dataset_dir)
 
     steps = [parse_step_spec(raw_step) for raw_step in args.step]
-    validate_step_uniqueness(dataset_dir, steps)
     output_dir = derive_output_dataset_dir(dataset_dir, steps)
     pair_input = args.pair_input
+    num_workers = max(1, args.num_workers)
+    expected_metadata = build_transform_metadata(
+        dataset_dir=dataset_dir,
+        output_dir=output_dir,
+        steps=steps,
+        seed=args.seed,
+        num_workers=num_workers,
+    )
 
     print(f"[INFO] input: {dataset_dir}")
     print(f"[INFO] steps: {[step.token for step in steps]}")
     print(f"[INFO] output: {output_dir}")
 
     if output_dir.exists() and not args.force:
-        metadata_path = output_dir / "transform.json"
-        if not metadata_path.exists():
-            raise RuntimeError(f"existing output is missing transform metadata: {metadata_path}")
-        expected_metadata = build_transform_metadata(
-            dataset_dir=dataset_dir,
-            output_dir=output_dir,
-            steps=steps,
-            seed=args.seed,
-            num_workers=max(1, args.num_workers),
-        )
-        if metadata_matches_request(metadata_path, expected_metadata):
+        metadata_file = metadata_path(output_dir)
+        if not metadata_file.exists():
+            raise RuntimeError(f"existing output is missing transform metadata: {metadata_file}")
+        if request_matches(metadata_file, expected_metadata):
             print(f"[SKIP] output variant already matches request: {output_dir}")
             return
         raise RuntimeError(
@@ -556,14 +465,15 @@ def main() -> None:
     if output_dir.exists() and args.force and not output_dir.is_dir():
         raise NotADirectoryError(output_dir)
 
+    jobs = collect_jobs(dataset_dir, output_dir, pair_input)
     materialize_dataset(
-        dataset_dir=dataset_dir,
         output_dir=output_dir,
+        metadata=expected_metadata,
         steps=steps,
         seed=args.seed,
-        num_workers=max(1, args.num_workers),
+        num_workers=num_workers,
         overwrite=args.overwrite,
-        pair_input=pair_input,
+        jobs=jobs,
     )
 
 

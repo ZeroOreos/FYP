@@ -188,18 +188,20 @@ def save_attack_pairs(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate hard or semi-hard face-swap attack pair candidates from embeddings.")
-    parser.add_argument("embeddings_src", type=str, help="Embeddings .npz path or result directory containing embeddings.npz")
+    parser.add_argument("embeddings_src", type=Path, help="Embeddings .npz path or result directory containing embeddings.npz")
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--samples-per-identity-pair", type=int, default=3)
     parser.add_argument("--pairing-mode", choices=("hard", "semi_hard"), default="hard")
     parser.add_argument("--min-identity-sim", type=float, default=None)
     parser.add_argument("--min-image-sim", type=float, default=None)
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.embeddings_src = args.embeddings_src.resolve()
+    return args
 
 
 def main() -> None:
     args = parse_args()
-    embeddings_path = resolve_embeddings_path(Path(args.embeddings_src).resolve())
+    embeddings_path = resolve_embeddings_path(args.embeddings_src)
     output_dir, prefix = derive_output_prefix(embeddings_path)
     out_npz = output_dir / f"{prefix}_atkpairs.npz"
     out_json = output_dir / f"{prefix}_atkpairs.json"

@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+from Utility.paths import resolve_dataset_context
 from Utility.runtime import ensure_dir, run_subprocess
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -32,40 +33,33 @@ def _load_json(path: Path) -> dict[str, Any]:
 def _variant_metadata_from_results_path(metrics_path: Path, metrics_data: dict[str, Any]) -> dict[str, Any]:
     variant_name = metrics_path.parent.parent.name
     pair_file = Path(metrics_data.get("pair_file", "")) if metrics_data.get("pair_file") else None
+    dataset_dir = next(iter(sorted(DATASET_ROOT.glob(f"*/{variant_name}"))), None)
+    if dataset_dir is not None:
+        context = resolve_dataset_context(dataset_dir)
+        return {
+            "base_dataset": context.base_dataset_name,
+            "referenced_base_root": context.base_root_name,
+            "variant_name": context.variant_name,
+            "variant_type": context.variant_type,
+            "num_transforms": context.num_transforms,
+            "transform_chain": context.transform_chain,
+            "pair_file": str(pair_file) if pair_file is not None else "",
+        }
+
     referenced_base_root = variant_name.rsplit("_", 1)[-1] if "_" in variant_name else variant_name
-
-    transform_tokens: list[str] = []
+    transform_chain = "clean"
     if variant_name != referenced_base_root:
-        suffix = f"__{referenced_base_root}"
-        if variant_name.endswith(suffix):
-            prefix = variant_name[: -len(suffix)]
-            transform_tokens = [token for token in prefix.split("__") if token]
-        else:
-            suffix = f"_{referenced_base_root}"
-            prefix = variant_name[: -len(suffix)] if variant_name.endswith(suffix) else variant_name
-            transform_tokens = [prefix] if prefix else []
-
-    if variant_name == referenced_base_root:
-        variant_type = "clean"
-    elif len(transform_tokens) <= 1:
-        variant_type = "single"
-    else:
-        variant_type = "hybrid"
-
+        prefix = variant_name[: -(len(referenced_base_root) + 1)] if variant_name.endswith(f"_{referenced_base_root}") else variant_name
+        transform_chain = prefix if prefix else "clean"
+    transform_tokens = [token for token in transform_chain.split("__") if token] if transform_chain != "clean" else []
+    variant_type = "clean" if transform_chain == "clean" else ("single" if len(transform_tokens) == 1 else "hybrid")
     base_dataset = ""
-    inferred_pair_file = ""
+    inferred_pair_file = str(pair_file) if pair_file is not None else ""
     if pair_file is not None and pair_file.name.endswith("_pairs.npz"):
-        stem = pair_file.name[: -len("_pairs.npz")]
-        stem_parts = stem.split("_")
+        stem_parts = pair_file.name[: -len("_pairs.npz")].split("_")
         if len(stem_parts) >= 2:
             base_dataset = stem_parts[0]
-            inferred_pair_file = str(pair_file)
             referenced_base_root = stem_parts[-1]
-
-    if not base_dataset:
-        candidate_roots = sorted(DATASET_ROOT.glob(f"*/{variant_name}"))
-        if len(candidate_roots) == 1:
-            base_dataset = candidate_roots[0].parent.name
 
     return {
         "base_dataset": base_dataset,

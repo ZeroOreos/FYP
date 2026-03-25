@@ -10,24 +10,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
+from Utility.embeddings import build_embedding_map, load_embeddings
 
 
 FAR_TARGETS = (0.1, 0.01, 0.001)
 MARGIN_BIN_EDGES = (0.05, 0.15)
-
-
-def _load_embeddings(path: Path) -> tuple[np.ndarray, list[str], list[str]]:
-    data = np.load(path, allow_pickle=True)
-    embeddings = np.asarray(data["embeddings"], dtype=np.float32)
-    image_paths = [str(Path(value).resolve()) for value in data["image_paths"].tolist()]
-    labels = [str(value) for value in data["labels"].tolist()]
-    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-    embeddings = embeddings / np.clip(norms, 1e-12, None)
-    return embeddings, image_paths, labels
-
-
-def _embedding_map(image_paths: list[str], embeddings: np.ndarray) -> dict[str, np.ndarray]:
-    return {path: embeddings[idx] for idx, path in enumerate(image_paths)}
 
 
 def _identity_centroids(embeddings: np.ndarray, labels: list[str]) -> dict[str, np.ndarray]:
@@ -157,11 +144,11 @@ def evaluate_attack(
     start = time.time()
     metadata = _load_attack_metadata(attack_metadata)
     attack_rows = _load_attack_rows(metadata)
-    gallery_emb, gallery_paths, gallery_labels = _load_embeddings(gallery_embeddings)
-    probe_emb, probe_paths, _ = _load_embeddings(probe_embeddings)
+    gallery_emb, gallery_paths, gallery_labels = load_embeddings(gallery_embeddings, require_labels=True)
+    probe_emb, probe_paths, _ = load_embeddings(probe_embeddings)
 
-    gallery_map = _embedding_map(gallery_paths, gallery_emb)
-    probe_map = _embedding_map(probe_paths, probe_emb)
+    gallery_map = build_embedding_map(gallery_paths, gallery_emb)
+    probe_map = build_embedding_map(probe_paths, probe_emb)
     centroids = _identity_centroids(gallery_emb, gallery_labels)
     thresholds = _load_thresholds_from_pairs(pairs_file, gallery_map)
     default_threshold = thresholds.get("best_threshold", 0.3)
@@ -306,22 +293,29 @@ def evaluate_attack(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate attack probes against clean gallery embeddings.")
-    parser.add_argument("gallery_embeddings", type=str)
-    parser.add_argument("probe_embeddings", type=str)
-    parser.add_argument("attack_metadata_json", type=str)
-    parser.add_argument("metrics_out", type=str)
-    parser.add_argument("--pairs-file", type=str, default=None)
-    return parser.parse_args()
+    parser.add_argument("gallery_embeddings", type=Path)
+    parser.add_argument("probe_embeddings", type=Path)
+    parser.add_argument("attack_metadata_json", type=Path)
+    parser.add_argument("metrics_out", type=Path)
+    parser.add_argument("--pairs-file", type=Path, default=None)
+    args = parser.parse_args()
+    args.gallery_embeddings = args.gallery_embeddings.resolve()
+    args.probe_embeddings = args.probe_embeddings.resolve()
+    args.attack_metadata_json = args.attack_metadata_json.resolve()
+    args.metrics_out = args.metrics_out.resolve()
+    if args.pairs_file is not None:
+        args.pairs_file = args.pairs_file.resolve()
+    return args
 
 
 def main() -> None:
     args = parse_args()
     evaluate_attack(
-        gallery_embeddings=Path(args.gallery_embeddings).resolve(),
-        probe_embeddings=Path(args.probe_embeddings).resolve(),
-        attack_metadata=Path(args.attack_metadata_json).resolve(),
-        metrics_out=Path(args.metrics_out).resolve(),
-        pairs_file=Path(args.pairs_file).resolve() if args.pairs_file else None,
+        gallery_embeddings=args.gallery_embeddings,
+        probe_embeddings=args.probe_embeddings,
+        attack_metadata=args.attack_metadata_json,
+        metrics_out=args.metrics_out,
+        pairs_file=args.pairs_file,
     )
 
 

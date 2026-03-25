@@ -227,7 +227,7 @@
 - slowed orchestration is split into `slowed/main_recognition_slowed.py` and `slowed/main_attack_slowed.py`
 - each domain may keep its own metadata module when that is clearer than forcing a shared abstraction
 - change reminder: refactor `Recognition/materialize.py` to feel closer to `Attack/materialize.py`
-- target for that refactor: keep `Recognition/materialize.py` as one workflow file, move metadata contract / request-matching into `Recognition/metadata.py`, and reduce helper sprawl so the file reads as a more linear materialization flow
+- target for that refactor: keep `Recognition/materialize.py` as one workflow file, keep metadata contract / request-matching in `Recognition/metadata.py`, and continue reducing helper sprawl so the file reads as a more linear materialization flow
 - utility cleanup reminder: keep `Utility/` as true shared infrastructure only; in particular, clean up `Utility/results_compile.py` by fixing stale package references, reusing `Utility/runtime.py` helpers where it stays cleaner, and only leaning on `Utility/paths.py` when that reduces inference noise rather than forcing abstraction
 - Attack evaluation must become a first-class pipeline, not a small add-on to recognition evaluation
 - Attack studies should report attack-specific thresholded and difficulty-aware metrics, not only balanced pairwise verification accuracy

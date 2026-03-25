@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 from tqdm import tqdm
+from Utility.embeddings import build_path_to_index, load_embeddings as load_embedding_bundle
 
 
 
@@ -67,61 +68,16 @@ def load_pairs(pairs_file: Path):
 
 
 def load_embeddings(embeddings_file: Path):
-    data = np.load(embeddings_file, allow_pickle=True)
-
-    embeddings = None
-    for key in ["embeddings", "embedding", "embs", "x", "features", "feats"]:
-        if key in data.files:
-            embeddings = np.asarray(data[key], dtype=np.float32)
-            break
-
-    if embeddings is None:
-        raise KeyError(f"No embeddings key found. Keys: {list(data.files)}")
-
-    image_paths = None
-    for key in ["image_paths", "paths", "img_paths", "filenames", "files"]:
-        if key in data.files:
-            image_paths = np.asarray(data[key]).astype(str)
-            break
-
-    if image_paths is None:
-        raise KeyError(
-            "No image path key found in embeddings file. "
-            "Expected one of: image_paths, paths, img_paths, filenames, files. "
-            f"Keys: {list(data.files)}"
-        )
-
-    if len(embeddings) != len(image_paths):
-        raise ValueError(
-            f"Embedding count ({len(embeddings)}) does not match image path count ({len(image_paths)})"
-        )
-
-    return embeddings, image_paths
-
-
-
-def l2_normalize(x, axis=1, eps=1e-12):
-    norms = np.linalg.norm(x, axis=axis, keepdims=True)
-    return x / np.clip(norms, eps, None)
-
+    embeddings, image_paths, _ = load_embedding_bundle(embeddings_file)
+    return embeddings, np.asarray(image_paths)
 
 def cosine_similarity(a, b):
     return np.sum(a * b, axis=1)
 
-
-def build_path_to_index(image_paths):
-    path_to_index = {}
-    duplicates = 0
-
-    for i, p in enumerate(image_paths):
-        rp = str(Path(p).resolve())
-        if rp in path_to_index:
-            duplicates += 1
-        path_to_index[rp] = i
-
+def path_index(image_paths):
+    path_to_index, duplicates = build_path_to_index([str(Path(path).resolve()) for path in image_paths.tolist()])
     if duplicates > 0:
         print(f"[WARN] Duplicate resolved image paths found in embeddings: {duplicates}")
-
     return path_to_index
 
 
@@ -508,13 +464,13 @@ def bootstrap_confidence_intervals(
 
 
 
-def main():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate InsightFace verification embeddings with reproducible metrics."
+        description="Evaluate verification embeddings with reproducible metrics."
     )
-    parser.add_argument("pairs_file", type=str, help="Shared pairs .npz")
-    parser.add_argument("embeddings_file", type=str, help="Embeddings .npz")
-    parser.add_argument("metrics_out", type=str, help="Output metrics .json")
+    parser.add_argument("pairs_file", type=Path, help="Shared pairs .npz")
+    parser.add_argument("embeddings_file", type=Path, help="Embeddings .npz")
+    parser.add_argument("metrics_out", type=Path, help="Output metrics .json")
     parser.add_argument("--model-name", type=str, default="InsightFace")
     parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap iterations")
     parser.add_argument(
@@ -530,10 +486,18 @@ def main():
         help="Drop unmatched pairs instead of raising an error"
     )
     args = parser.parse_args()
+    args.pairs_file = args.pairs_file.resolve()
+    args.embeddings_file = args.embeddings_file.resolve()
+    args.metrics_out = args.metrics_out.resolve()
+    return args
 
-    pairs_file = Path(args.pairs_file).resolve()
-    embeddings_file = Path(args.embeddings_file).resolve()
-    metrics_out = Path(args.metrics_out).resolve()
+
+def main():
+    args = parse_args()
+
+    pairs_file = args.pairs_file
+    embeddings_file = args.embeddings_file
+    metrics_out = args.metrics_out
 
     if not pairs_file.exists():
         raise FileNotFoundError(f"Pairs file not found: {pairs_file}")
@@ -554,13 +518,12 @@ def main():
     print(f"[INFO] Loaded pairs: {len(y_true)}")
 
     embeddings, image_paths = load_embeddings(embeddings_file)
-    embeddings = l2_normalize(embeddings, axis=1)
 
     print(f"[INFO] Loaded embeddings:  {embeddings.shape}")
     print(f"[INFO] Loaded image paths: {image_paths.shape}")
     print("[INFO] Applied L2 normalization")
 
-    path_to_index = build_path_to_index(image_paths)
+    path_to_index = path_index(image_paths)
     original_pair_count = len(y_true)
 
     idx1, idx2, valid_mask = map_pairs_to_indices(

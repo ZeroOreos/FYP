@@ -19,16 +19,24 @@ ATTACK_SCRIPT = PROJECT_ROOT / "Attack" / "materialize.py"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Dataset materialization wrapper for non-attack and attack variants.")
-    parser.add_argument("dataset_dir", type=str)
+    parser.add_argument("dataset_dir", type=Path)
     parser.add_argument("--step", action="append", required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-workers", type=int, default=None)
-    parser.add_argument("--pair-input", type=str, default=None)
-    parser.add_argument("--generator-script", type=str, default=None)
-    parser.add_argument("--output-dir", type=str, default=None)
+    parser.add_argument("--pair-input", type=Path, default=None)
+    parser.add_argument("--generator-script", type=Path, default=None)
+    parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--force", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.dataset_dir = args.dataset_dir.resolve()
+    if args.pair_input is not None:
+        args.pair_input = args.pair_input.resolve()
+    if args.generator_script is not None:
+        args.generator_script = args.generator_script.resolve()
+    if args.output_dir is not None:
+        args.output_dir = args.output_dir.resolve()
+    return args
 
 
 def is_recognition_materialize_mode(steps: list[str], generator_script: str | None) -> bool:
@@ -50,7 +58,7 @@ def validate_attack_steps(steps: list[str]) -> None:
 
 def build_subcommand(args: argparse.Namespace) -> list[str]:
     script = MODIFY_SCRIPT if is_recognition_materialize_mode(args.step, args.generator_script) else ATTACK_SCRIPT
-    cmd = [sys.executable, str(script), str(Path(args.dataset_dir).resolve())]
+    cmd = [sys.executable, str(script), str(args.dataset_dir)]
     for step in args.step:
         cmd.extend(["--step", step])
     cmd.extend(["--seed", str(args.seed)])
@@ -59,7 +67,7 @@ def build_subcommand(args: argparse.Namespace) -> list[str]:
         if args.num_workers is not None:
             cmd.extend(["--num-workers", str(args.num_workers)])
         if args.pair_input:
-            cmd.extend(["--pair-input", str(Path(args.pair_input).resolve())])
+            cmd.extend(["--pair-input", str(args.pair_input)])
         if args.overwrite:
             cmd.append("--overwrite")
         if args.force:
@@ -70,10 +78,10 @@ def build_subcommand(args: argparse.Namespace) -> list[str]:
             raise ValueError("attack materialization requires --pair-input")
         if not args.generator_script:
             raise ValueError("attack materialization currently requires --generator-script")
-        cmd.extend(["--pair-input", str(Path(args.pair_input).resolve())])
-        cmd.extend(["--generator-script", str(Path(args.generator_script).resolve())])
+        cmd.extend(["--pair-input", str(args.pair_input)])
+        cmd.extend(["--generator-script", str(args.generator_script)])
         if args.output_dir:
-            cmd.extend(["--output-dir", str(Path(args.output_dir).resolve())])
+            cmd.extend(["--output-dir", str(args.output_dir)])
         if args.force:
             cmd.append("--force")
     return cmd

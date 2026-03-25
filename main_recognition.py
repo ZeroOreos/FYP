@@ -18,10 +18,12 @@ PAIRS_SCRIPT = PROJECT_ROOT / "Recognition" / "pairs.py"
 VERIFY_SCRIPT = PROJECT_ROOT / "Recognition" / "evaluate.py"
 
 
-def parse_args() -> Path:
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run cached recognition orchestration.")
     parser.add_argument("dataset_dir", type=Path, help="Dataset root to evaluate.")
-    return parser.parse_args().dataset_dir.resolve()
+    args = parser.parse_args()
+    args.dataset_dir = args.dataset_dir.resolve()
+    return args
 
 
 def embeddings_output_path(variant_name: str, model_name: str) -> Path:
@@ -88,7 +90,8 @@ def maybe_run_evaluate(variant_name: str, model: dict[str, Path], pairs_file: Pa
 
 
 def main() -> None:
-    dataset_dir = parse_args()
+    args = parse_args()
+    dataset_dir = args.dataset_dir
     validate_input_dataset(dataset_dir)
     validate_model_registry(MODELS)
 

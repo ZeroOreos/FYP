@@ -1,0 +1,16 @@
+{
+  "dataset_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/CelebA/val",
+  "variant_name": "val",
+  "base_dataset": "CelebA",
+  "referenced_base_root": "val",
+  "variant_type": "clean",
+  "transform_chain": "clean",
+  "num_transforms": 0,
+  "pairs_out": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/pairs/CelebA_val_pairs.npz",
+  "dataset_hash": "3cfa2aaddf468baec4c3e9828e530e48e993a3e5547d26a6b5c06e3e5b173c97",
+  "seed": 42,
+  "repeats": 1,
+  "folds": 5,
+  "python_version": "3.9.6",
+  "numpy_version": "2.0.2"
+}
