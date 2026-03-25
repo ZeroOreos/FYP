@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# python3 modifier.py <dataset_dir> --step <spec> [--step ...] -> wrapper around Utility/modify.py and Attack/materialize.py
+# python3 modifier.py <dataset_dir> --step <spec> [--step ...] -> wrapper around Recognition/materialize.py and Attack/materialize.py
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ import sys
 from pathlib import Path
 
 from Attack.materialize import ATTACK_METHODS
-from Utility.modify import REGISTRY as MODIFY_REGISTRY
+from Recognition.materialize import REGISTRY as MODIFY_REGISTRY
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-MODIFY_SCRIPT = PROJECT_ROOT / "Utility" / "modify.py"
+MODIFY_SCRIPT = PROJECT_ROOT / "Recognition" / "materialize.py"
 ATTACK_SCRIPT = PROJECT_ROOT / "Attack" / "materialize.py"
 
 
@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def is_modify_mode(steps: list[str], generator_script: str | None) -> bool:
+def is_recognition_materialize_mode(steps: list[str], generator_script: str | None) -> bool:
     if generator_script:
         return False
     for raw in steps:
@@ -49,7 +49,7 @@ def validate_attack_steps(steps: list[str]) -> None:
 
 
 def build_subcommand(args: argparse.Namespace) -> list[str]:
-    script = MODIFY_SCRIPT if is_modify_mode(args.step, args.generator_script) else ATTACK_SCRIPT
+    script = MODIFY_SCRIPT if is_recognition_materialize_mode(args.step, args.generator_script) else ATTACK_SCRIPT
     cmd = [sys.executable, str(script), str(Path(args.dataset_dir).resolve())]
     for step in args.step:
         cmd.extend(["--step", step])
@@ -82,7 +82,7 @@ def build_subcommand(args: argparse.Namespace) -> list[str]:
 def main() -> None:
     args = parse_args()
     cmd = build_subcommand(args)
-    print("[INFO] modifier.py wrapper dispatch")
+    print("[INFO] modifier.py dispatch")
     print("[CMD]", " ".join(cmd))
     subprocess.run(cmd, check=True)
 

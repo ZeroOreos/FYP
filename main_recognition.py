@@ -7,11 +7,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from Shared.paths import derive_pairs_output_path, resolve_dataset_context
-from Shared.results_compile import rebuild_compiled_csv, rebuild_parsed_results
-from Shared.runtime import ALLOW_MISSING_PAIRS, MODELS, PAIRS_ROOT, PROJECT_ROOT, RESULTS_ROOT
-from Shared.runtime import THROTTLE_BATCH_SIZE, MODEL_THROTTLE_DELAYS
-from Shared.runtime import ensure_dir, run_subprocess, validate_input_dataset, validate_model_registry
+from Utility.paths import derive_pairs_output_path, resolve_dataset_context
+from Utility.results_compile import rebuild_compiled_csv, rebuild_parsed_results
+from Utility.runtime import ALLOW_MISSING_PAIRS, MODELS, PAIRS_ROOT, PROJECT_ROOT, RESULTS_ROOT
+from Utility.runtime import THROTTLE_BATCH_SIZE, MODEL_THROTTLE_DELAYS
+from Utility.runtime import ensure_dir, run_subprocess, validate_input_dataset, validate_model_registry
 
 
 PAIRS_SCRIPT = PROJECT_ROOT / "Recognition" / "pairs.py"

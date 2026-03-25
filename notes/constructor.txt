@@ -39,12 +39,12 @@
 - `Modifiers/preprocessing/`: corruption / degradation builders
 - `Modifiers/protection/`: privacy / anti-recognition image-level methods
 - `Modifiers/attack/`: face-swap / reenactment method wrappers
-- `Shared/paths.py`: dataset naming / base-root / chain resolution
-- `Shared/runtime.py`: shared paths, subprocess helpers, and model registry
-- `Shared/slowed.py`: slowed-process orchestration helpers
-- `Shared/results_compile.py`: compiled / parsed result rebuild helpers
-- `Shared/results_parse.py`: readable result-table generation from `compiled_results.csv`
-- `Utility/modify.py`: non-adversarial dataset materialization implementation
+- `Utility/paths.py`: dataset naming / base-root / chain resolution
+- `Utility/runtime.py`: shared paths, subprocess helpers, and model registry
+- `Utility/slowed.py`: slowed-process orchestration helpers
+- `Utility/results_compile.py`: compiled / parsed result rebuild helpers
+- `Utility/results_parse.py`: readable result-table generation from `compiled_results.csv`
+- `Recognition/materialize.py`: non-adversarial dataset materialization implementation
 - `Recognition/pairs.py`: clean pair generation helpers
 - `Recognition/evaluate.py`: shared clean / corruption / protection verification evaluator
 - `Attack/materialize.py`: adversarial dataset materialization implementation and attack metadata writer
@@ -162,7 +162,7 @@
 - `python3 modifier.py <dataset_dir> --step <modifier_spec> [--step ...] [--pair-input <atkpairs>]` -> derived variant root
 - Output root stays under the same dataset parent
 - `modifier.py` is a wrapper entry point only
-- Non-adversarial steps dispatch to `Utility/modify.py`
+- Non-adversarial steps dispatch to `Recognition/materialize.py`
 - Adversarial / pair-driven steps dispatch to `Attack/materialize.py`
 - Optional `--pair-input` restricts work to referenced images or pairs, depending on mode
 - If derived root already exists, warn and skip unless `--force`
@@ -220,7 +220,7 @@
 ## Design Rules
 - recognition / attack orchestration is split into `main_recognition.py` and `main_attack.py`
 - domain pipeline code should live under `Recognition/` and `Attack/`
-- reusable helpers should live under `Shared/`
+- reusable helpers should live under `Utility/`
 - slowed orchestration is split into `slowed/main_recognition_slowed.py` and `slowed/main_attack_slowed.py`
 - Attack evaluation must become a first-class pipeline, not a small add-on to recognition evaluation
 - Attack studies should report attack-specific thresholded and difficulty-aware metrics, not only balanced pairwise verification accuracy

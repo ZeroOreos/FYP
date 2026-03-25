@@ -18,8 +18,8 @@ except ImportError:
     )
     sys.exit(1)
 
-from Shared.slowed import add_pause_args
-from Shared.slowed import resolve_main_script, run_paused_subprocess, validate_input_dir
+from Utility.slowed import add_pause_args
+from Utility.slowed import resolve_main_script, run_paused_subprocess, validate_input_dir
 
 
 def parse_args() -> argparse.Namespace:

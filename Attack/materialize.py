@@ -12,8 +12,8 @@ from typing import Any
 
 import numpy as np
 
-from Shared.paths import resolve_dataset_context
-from Shared.runtime import run_subprocess
+from Utility.paths import resolve_dataset_context
+from Utility.runtime import run_subprocess
 
 
 METADATA_FILENAME = "attack_metadata.json"

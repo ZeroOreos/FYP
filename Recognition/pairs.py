@@ -17,7 +17,7 @@ if __package__ is None or __package__ == "":
     if project_root_str not in sys.path:
         sys.path.insert(0, project_root_str)
 
-from Shared.paths import derive_pairs_output_path, resolve_dataset_context
+from Utility.paths import derive_pairs_output_path, resolve_dataset_context
 
 
 VALID_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}

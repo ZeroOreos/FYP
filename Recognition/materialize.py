@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-# python3 Utility/modify.py <dataset_dir> --step <name[:k=v,...]> [--step ...] [--pair-input <atkpairs>] -> Dataset/<dataset>/<newest__...__base_root>; preserves structure
+# python3 Recognition/materialize.py <dataset_dir> --step <name[:k=v,...]> [--step ...] [--pair-input <atkpairs>] -> Dataset/<dataset>/<newest__...__base_root>; preserves structure
 
 
 from __future__ import annotations
 
-import argparse
 import concurrent.futures
 import hashlib
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -22,7 +22,7 @@ from Modifiers.preprocessing.geometry import RotationMisalignment
 from Modifiers.preprocessing.illumination import BrightnessShift, ContrastShift, GammaShift
 from Modifiers.preprocessing.occlusion import EyeBandOcclusion, FaceMaskOcclusion, RandomBlockOcclusion
 from Modifiers.preprocessing.resampling import ResolutionResampling
-from Shared.paths import resolve_dataset_context
+from Utility.paths import resolve_dataset_context
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -163,6 +163,17 @@ class Job:
     src_path: Path
     dst_path: Path
     relative_path: str
+
+
+@dataclass
+class Args:
+    dataset_dir: Path
+    step: list[str]
+    seed: int = 42
+    num_workers: int = max(1, (os.cpu_count() or 4) - 1)
+    pair_input: Path | None = None
+    overwrite: bool = False
+    force: bool = False
 
 
 def parse_scalar(value: str) -> Any:
@@ -473,32 +484,51 @@ def validate_input_dataset(dataset_dir: Path) -> None:
     resolve_dataset_context(dataset_dir)
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Materialize a named modifier dataset variant.")
-    parser.add_argument("dataset_dir", type=str, help="Path to Dataset/<dataset>/<variant_root>")
-    parser.add_argument(
-        "--step",
-        action="append",
-        required=True,
-        help="Modifier step like blur:severity=3 or jpeg:quality=30. Repeat to build hybrids.",
-    )
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--num-workers", type=int, default=max(1, (os.cpu_count() or 4) - 1))
-    parser.add_argument("--pair-input", type=str, default=None, help="Optional atkpairs npz to restrict materialization to referenced images.")
-    parser.add_argument("--overwrite", action="store_true")
-    parser.add_argument("--force", action="store_true", help="Allow writing into an existing output variant root.")
-    return parser.parse_args()
+def parse_args(argv: list[str]) -> Args:
+    if len(argv) < 2 or argv[1] in {"-h", "--help"}:
+        raise SystemExit(
+            "Usage: python3 Recognition/materialize.py <dataset_dir> --step <name[:k=v,...]> [--step ...] "
+            "[--seed <int>] [--num-workers <int>] [--pair-input <atkpairs>] [--overwrite] [--force]"
+        )
+
+    args = Args(dataset_dir=Path(argv[1]).resolve(), step=[])
+    index = 2
+    while index < len(argv):
+        token = argv[index]
+        if token == "--step":
+            index += 1
+            args.step.append(argv[index])
+        elif token == "--seed":
+            index += 1
+            args.seed = int(argv[index])
+        elif token == "--num-workers":
+            index += 1
+            args.num_workers = int(argv[index])
+        elif token == "--pair-input":
+            index += 1
+            args.pair_input = Path(argv[index]).resolve()
+        elif token == "--overwrite":
+            args.overwrite = True
+        elif token == "--force":
+            args.force = True
+        else:
+            raise SystemExit(f"Unknown argument: {token}")
+        index += 1
+
+    if not args.step:
+        raise SystemExit("Recognition/materialize.py requires at least one --step")
+    return args
 
 
 def main() -> None:
-    args = parse_args()
-    dataset_dir = Path(args.dataset_dir).resolve()
+    args = parse_args(sys.argv)
+    dataset_dir = args.dataset_dir
     validate_input_dataset(dataset_dir)
 
     steps = [parse_step_spec(raw_step) for raw_step in args.step]
     validate_step_uniqueness(dataset_dir, steps)
     output_dir = derive_output_dataset_dir(dataset_dir, steps)
-    pair_input = Path(args.pair_input).resolve() if args.pair_input else None
+    pair_input = args.pair_input
 
     print(f"[INFO] input: {dataset_dir}")
     print(f"[INFO] steps: {[step.token for step in steps]}")
