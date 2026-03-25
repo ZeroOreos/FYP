@@ -9,24 +9,13 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+from Utility.runtime import ensure_dir, run_subprocess
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATASET_ROOT = PROJECT_ROOT / "Dataset"
 RESULTS_ROOT = PROJECT_ROOT / "Results"
 COMPILED_CSV = RESULTS_ROOT / "compiled_results.csv"
-RESULTS_PARSE_SCRIPT = PROJECT_ROOT / "Shared" / "results_parse.py"
-
-
-def ensure_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-
-
-def run_subprocess(cmd: list[str], stage_name: str) -> None:
-    print(f"\n[RUN] {stage_name}")
-    print("[CMD]", " ".join(cmd))
-    import subprocess
-
-    subprocess.run(cmd, check=True)
+RESULTS_PARSE_SCRIPT = PROJECT_ROOT / "Utility" / "results_parse.py"
 
 
 def collect_metrics_files() -> list[Path]:

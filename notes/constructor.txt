@@ -44,10 +44,12 @@
 - `Utility/slowed.py`: slowed-process orchestration helpers
 - `Utility/results_compile.py`: compiled / parsed result rebuild helpers
 - `Utility/results_parse.py`: readable result-table generation from `compiled_results.csv`
-- `Recognition/materialize.py`: non-adversarial dataset materialization implementation
+- `Recognition/materialize.py`: non-adversarial dataset materialization workflow
+- `Recognition/metadata.py`: non-adversarial transform metadata contract and matching logic
 - `Recognition/pairs.py`: clean pair generation helpers
 - `Recognition/evaluate.py`: shared clean / corruption / protection verification evaluator
-- `Attack/materialize.py`: adversarial dataset materialization implementation and attack metadata writer
+- `Attack/materialize.py`: adversarial dataset materialization workflow
+- `Attack/metadata.py`: adversarial metadata contract and matching logic
 - `Attack/pairs.py`: hard / semi-hard attack pair generation from embeddings
 - `Attack/evaluate.py`: shared impersonation / attack-success evaluator
 - `Models/<Model>/generate.py`: dataset root -> embeddings
@@ -81,7 +83,7 @@
 - Full per-sample manifests are not required by default
 
 ## Attack Metadata
-- Every attack root must include a compact JSON metadata file written by `Attack/materialize.py`
+- Every attack root must include a compact JSON metadata file defined by `Attack/metadata.py` and written by `Attack/materialize.py`
 - The JSON is a small derivation record, not a method catalog or full semantic restatement of every sample
 - Required dataset-level fields:
 - `input_dataset_dir`
@@ -168,9 +170,10 @@
 - If derived root already exists, warn and skip unless `--force`
 - Reject exact duplicate transform tokens already present in the input chain
 - Reject duplicate transform tokens repeated within the same run
-- `transform.json` is written at `<variant_root>/transform.json`
-- Non-adversarial variants use `transform.json` to store ordered pipeline, params, seed, and paths
-- Adversarial variants use a compact attack metadata JSON instead of a full per-sample manifest
+- `Recognition/metadata.py` defines the `transform.json` structure and request-matching rules
+- `Attack/metadata.py` defines the compact attack metadata JSON structure and request-matching rules
+- Non-adversarial variants keep `transform.json` as the metadata file
+- Adversarial variants keep a compact attack metadata JSON instead of a full per-sample manifest
 
 ## Models
 - `Models/<Model>/generate.py`: `<dataset_dir> <embeddings_out>` -> embeddings
@@ -222,6 +225,10 @@
 - domain pipeline code should live under `Recognition/` and `Attack/`
 - reusable helpers should live under `Utility/`
 - slowed orchestration is split into `slowed/main_recognition_slowed.py` and `slowed/main_attack_slowed.py`
+- each domain may keep its own metadata module when that is clearer than forcing a shared abstraction
+- change reminder: refactor `Recognition/materialize.py` to feel closer to `Attack/materialize.py`
+- target for that refactor: keep `Recognition/materialize.py` as one workflow file, move metadata contract / request-matching into `Recognition/metadata.py`, and reduce helper sprawl so the file reads as a more linear materialization flow
+- utility cleanup reminder: keep `Utility/` as true shared infrastructure only; in particular, clean up `Utility/results_compile.py` by fixing stale package references, reusing `Utility/runtime.py` helpers where it stays cleaner, and only leaning on `Utility/paths.py` when that reduces inference noise rather than forcing abstraction
 - Attack evaluation must become a first-class pipeline, not a small add-on to recognition evaluation
 - Attack studies should report attack-specific thresholded and difficulty-aware metrics, not only balanced pairwise verification accuracy
 - Filesystem semantics should be primary for attack datasets; metadata should supplement only what cannot be safely inferred
