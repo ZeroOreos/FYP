@@ -77,7 +77,7 @@ def cosine_similarity(a, b):
 def path_index(image_paths):
     path_to_index, duplicates = build_path_to_index([str(Path(path).resolve()) for path in image_paths.tolist()])
     if duplicates > 0:
-        print(f"[WARN] Duplicate resolved image paths found in embeddings: {duplicates}")
+        print(f"[WARN] Duplicate image paths in embeddings: {duplicates}")
     return path_to_index
 
 
@@ -117,8 +117,8 @@ def map_pairs_to_indices(img1_paths, img2_paths, path_to_index, strict_missing=T
         )
         if strict_missing:
             raise KeyError(msg)
-        print(f"[WARN] Dropped unmatched pairs: {dropped}")
-        print(f"[WARN] Example dropped pairs: {missing_examples}")
+        print(f"[WARN] Unmatched pairs dropped: {dropped}")
+        print(f"[WARN] Dropped pair examples: {missing_examples}")
 
     return idx1, idx2, valid_mask
 
@@ -466,13 +466,13 @@ def bootstrap_confidence_intervals(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate verification embeddings with reproducible metrics."
+        description="Score verification embeddings."
     )
-    parser.add_argument("pairs_file", type=Path, help="Shared pairs .npz")
+    parser.add_argument("pairs_file", type=Path, help="Pairs .npz")
     parser.add_argument("embeddings_file", type=Path, help="Embeddings .npz")
-    parser.add_argument("metrics_out", type=Path, help="Output metrics .json")
+    parser.add_argument("metrics_out", type=Path, help="Metrics .json")
     parser.add_argument("--model-name", type=str, default="InsightFace")
-    parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap iterations")
+    parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap runs")
     parser.add_argument(
         "--far-targets",
         type=float,
@@ -483,7 +483,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--allow-missing-pairs",
         action="store_true",
-        help="Drop unmatched pairs instead of raising an error"
+        help="Drop unmatched pairs. No hard fail."
     )
     args = parser.parse_args()
     args.pairs_file = args.pairs_file.resolve()

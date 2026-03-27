@@ -1,6 +1,6 @@
 # python3 generate.py <dataset_dir> <embeddings_out> [batch_delay] -> embeddings.npz
 
-import sys
+import argparse
 import time
 from pathlib import Path
 from typing import List, Tuple
@@ -9,6 +9,8 @@ import cv2
 import numpy as np
 from insightface.app import FaceAnalysis
 from tqdm import tqdm
+
+from Utility.runtime import resolve_onnx_providers
 
 
 VALID_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
@@ -27,13 +29,14 @@ def collect_items(dataset_dir: Path) -> List[Tuple[Path, str]]:
     return items
 
 
-def build_app() -> FaceAnalysis:
+def build_app(provider: str | None = None) -> tuple[FaceAnalysis, list[str]]:
+    providers = resolve_onnx_providers(provider)
     app = FaceAnalysis(
         name="antelopev2",
-        providers=["CoreMLExecutionProvider", "CPUExecutionProvider"],
+        providers=providers,
     )
     app.prepare(ctx_id=0, det_size=(640, 640))
-    return app
+    return app, providers
 
 
 def load_image(img_path: Path):
@@ -91,14 +94,16 @@ def generate_embeddings(items, app, batch_delay=BATCH_DELAY):
 
 
 def main():
-    if len(sys.argv) < 3:
-        print("Usage: python3 generate.py <dataset_dir> <embeddings_out> [batch_delay]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Generate InsightFace embeddings.")
+    parser.add_argument("dataset_dir", type=Path)
+    parser.add_argument("embeddings_out", type=Path)
+    parser.add_argument("batch_delay", type=float, nargs="?", default=BATCH_DELAY)
+    parser.add_argument("--provider", choices=("auto", "coreml", "cuda", "cpu"), default=None)
+    args = parser.parse_args()
 
-    dataset_dir = Path(sys.argv[1]).resolve()
-    embeddings_out = Path(sys.argv[2]).resolve()
-    
-    batch_delay = float(sys.argv[3]) if len(sys.argv) > 3 else BATCH_DELAY
+    dataset_dir = args.dataset_dir.resolve()
+    embeddings_out = args.embeddings_out.resolve()
+    batch_delay = float(args.batch_delay)
 
     if not dataset_dir.exists() or not dataset_dir.is_dir():
         raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
@@ -113,7 +118,8 @@ def main():
     print(f"[INFO] Images found:   {len(items)}")
     print(f"[INFO] Identities:     {len(identities)}")
 
-    app = build_app()
+    app, providers = build_app(args.provider)
+    print(f"[INFO] Providers:       {providers}")
 
     embeddings, image_paths, labels, skipped = generate_embeddings(items, app, batch_delay)
 
@@ -138,11 +144,11 @@ def main():
         lost_identities = sorted(all_identities - kept_identities)
 
         print(f"[WARN] Skipped images: {len(skipped)}")
-        print(f"[WARN] Skipped log:    {skipped_file}")
-        print(f"[WARN] Remaining ids:  {len(kept_identities)} / {len(all_identities)}")
+        print(f"[WARN] Skip log: {skipped_file}")
+        print(f"[WARN] Remaining ids: {len(kept_identities)} / {len(all_identities)}")
 
         if lost_identities:
-            print(f"[WARN] Lost identities with zero valid images: {len(lost_identities)}")
+            print(f"[WARN] Lost ids with zero valid images: {len(lost_identities)}")
     else:
         print("[INFO] No skipped images.")
 

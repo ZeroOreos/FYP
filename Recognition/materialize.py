@@ -392,7 +392,7 @@ def materialize_dataset(
         failures_path = output_dir / "failures.json"
         with open(failures_path, "w", encoding="utf-8") as handle:
             json.dump(failures, handle, indent=2)
-        print(f"[WARN] {len(failures)} files failed; details in {failures_path}")
+        print(f"[WARN] {len(failures)} files failed. See: {failures_path}")
 
     write_transform_metadata(metadata_path(output_dir), metadata)
     print(f"[INFO] written: {written}")
@@ -409,17 +409,17 @@ def validate_input_dataset(dataset_dir: Path) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Materialize a named recognition-side dataset variant.")
-    parser.add_argument("dataset_dir", type=Path, help="Path to Dataset/<dataset>/<variant_root>.")
+    parser = argparse.ArgumentParser(description="Build recognition dataset variant.")
+    parser.add_argument("dataset_dir", type=Path, help="Dataset/<dataset>/<variant_root>.")
     parser.add_argument(
         "--step",
         action="append",
         required=True,
-        help="Modifier step like blur:severity=3 or jpeg:quality=30. Repeat to build hybrids.",
+        help="Modifier step. Repeat for hybrids.",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-workers", type=int, default=max(1, (os.cpu_count() or 4) - 1))
-    parser.add_argument("--pair-input", type=Path, default=None, help="Optional pair-like input used to restrict images.")
+    parser.add_argument("--pair-input", type=Path, default=None, help="Optional pair-like input. Restricts images.")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()

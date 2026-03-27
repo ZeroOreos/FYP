@@ -12,6 +12,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
 from Arcface.testing.model import ArcFaceModel, ArcMarginProduct
+from Utility.runtime import resolve_torch_device
 
 
 TRAIN_DIR = "/content/drive/MyDrive/FYP/dataset/celeba_arcface/train"
@@ -33,14 +34,15 @@ MARGIN_S = 30.0
 MARGIN_M = 0.50
 
 SEED = 42
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = resolve_torch_device()
 
 
 def set_seed(seed=42):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
@@ -145,7 +147,7 @@ def get_dataloaders(train_dir, val_dir):
         batch_size=BATCH_SIZE,
         shuffle=True,
         num_workers=NUM_WORKERS,
-        pin_memory=True
+        pin_memory=(DEVICE == "cuda")
     )
 
     val_loader = DataLoader(
@@ -153,7 +155,7 @@ def get_dataloaders(train_dir, val_dir):
         batch_size=BATCH_SIZE,
         shuffle=False,
         num_workers=NUM_WORKERS,
-        pin_memory=True
+        pin_memory=(DEVICE == "cuda")
     )
 
     return train_ds, val_ds, train_loader, val_loader, class_to_idx

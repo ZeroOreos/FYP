@@ -1,6 +1,6 @@
 # python3 generate.py <dataset_dir> <embeddings_out> [batch_size] [batch_delay] -> embeddings.npz
 
-import sys
+import argparse
 import time
 from pathlib import Path
 from typing import List, Tuple
@@ -10,6 +10,8 @@ import torch
 from PIL import Image
 from facenet_pytorch import InceptionResnetV1
 from tqdm import tqdm
+
+from Utility.runtime import resolve_torch_device
 
 
 VALID_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
@@ -93,22 +95,25 @@ def generate_embeddings(
 
 
 def main():
-    if len(sys.argv) < 3:
-        print("Usage: python3 FaceNet/generate.py <dataset_dir> <embeddings_out> [batch_size] [batch_delay]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Generate FaceNet embeddings.")
+    parser.add_argument("dataset_dir", type=Path)
+    parser.add_argument("embeddings_out", type=Path)
+    parser.add_argument("batch_size", type=int, nargs="?", default=BATCH_SIZE)
+    parser.add_argument("batch_delay", type=float, nargs="?", default=BATCH_DELAY)
+    parser.add_argument("--device", choices=("auto", "cuda", "mps", "cpu"), default=None)
+    args = parser.parse_args()
 
-    dataset_dir = Path(sys.argv[1]).resolve()
-    embeddings_out = Path(sys.argv[2]).resolve()
-    
-    batch_size = int(sys.argv[3]) if len(sys.argv) > 3 else BATCH_SIZE
-    batch_delay = float(sys.argv[4]) if len(sys.argv) > 4 else BATCH_DELAY
+    dataset_dir = args.dataset_dir.resolve()
+    embeddings_out = args.embeddings_out.resolve()
+    batch_size = int(args.batch_size)
+    batch_delay = float(args.batch_delay)
 
     if not dataset_dir.exists():
         raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
     if not dataset_dir.is_dir():
         raise NotADirectoryError(f"Dataset path is not a directory: {dataset_dir}")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(resolve_torch_device(args.device))
 
     print(f"[INFO] Dataset dir:     {dataset_dir}")
     print(f"[INFO] Embeddings out: {embeddings_out}")

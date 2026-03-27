@@ -5,6 +5,77 @@
 - Main question: can manipulated probes be accepted as the victim identity
 - Secondary tasks: recognition robustness, privacy protection, readable benchmarking
 
+## Writing Style Contract
+- Target: README text, code comments, short docs, usage notes, warning text, CLI help text when practical
+- Tone: human, sharp, plain, low-clutter
+- Priority: clarity first, brevity second, completeness third
+- Avoid: soft framing, filler, corporate phrasing, tutorial voice, paragraph sprawl
+
+## Writing Style Rules
+- Prefer lists for how-to content
+- Prefer short blocks over dense paragraphs
+- Use full sentences only when needed for ambiguity control
+- Short sentence style is preferred
+- Sentence fragments are allowed when clearer
+- Warnings should be blunt and cut off fast
+- Example warning style:
+- `Warning: wrong CUDA version. Broken env.`
+- `Warning: forced backend missing. Hard fail.`
+- Do not pad warnings with reassurance unless the action is genuinely unclear
+- Do not narrate obvious transitions
+- Do not add background unless it changes the user's next action
+
+## README Style Rules
+- Start with what the repo does
+- Then the main entry points
+- Then model / backend rules
+- Then install
+- Then run commands
+- Then minimal layout notes if still useful
+- How-to sections should be mostly bullets and code blocks
+- Keep prose thin
+- Prefer command-first examples
+- Prefer one canonical example over many variations
+
+## Comment Style Rules
+- Comments must earn their keep
+- Use comments for intent, invariants, contracts, hidden assumptions, and failure semantics
+- Do not comment obvious syntax
+- Keep comments short
+- Prefer noun phrases or short imperative fragments when enough
+- Good:
+- `# attack roots mimic victim folder structure`
+- `# fail fast on backend mismatch`
+- `# preserve source filename for identity recovery`
+- Bad:
+- `# This function loops through the files and processes them one by one`
+- `# Set the variable to the path`
+
+## Warning / Error Text Rules
+- Warning text should be direct
+- Error text should say what failed and why
+- Recovery hint only if short and actionable
+- Avoid apology language
+- Avoid vague wording like `something went wrong`
+- Prefer:
+- `dataset directory not found`
+- `CUDA was requested but is not available`
+- `existing output metadata does not match request`
+
+## Formatting Rules For Human Text
+- Prefer flat bullets
+- No nested bullet trees unless structure is truly necessary
+- Keep headings short
+- Prefer concrete nouns over abstractions
+- Prefer stable terms already used in the repo
+- Avoid synonym drift across README, comments, metadata docs, and CLI help
+
+## Reproducibility Rule For Writing
+- New human-facing text should match this style unless a file already has a stronger local convention
+- When rewriting existing docs, compress before expanding
+- If a section can be expressed as bullets, do that
+- If a warning can be shortened without losing meaning, shorten it
+
 ## Top-Level Entry Points
 - `main_recognition.py`: current recognition / verification pipeline
 - `main_attack.py`: attack-verification pipeline

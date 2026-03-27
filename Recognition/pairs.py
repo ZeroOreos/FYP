@@ -131,9 +131,9 @@ def pairs_to_arrays(pairs):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate balanced face verification pairs.")
-    parser.add_argument("dataset_dir", type=Path, help="Path to dataset root (identity/image structure).")
-    parser.add_argument("--pairs-out", type=Path, default=None, help="Optional custom output path.")
+    parser = argparse.ArgumentParser(description="Build balanced verification pairs.")
+    parser.add_argument("dataset_dir", type=Path, help="Dataset root.")
+    parser.add_argument("--pairs-out", type=Path, default=None, help="Custom output path.")
 
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--repeats", type=int, default=DEFAULT_REPEATS)

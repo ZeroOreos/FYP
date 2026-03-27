@@ -427,7 +427,7 @@ def rebuild_compiled_csv() -> None:
 
 def rebuild_parsed_results() -> None:
     if not RESULTS_PARSE_SCRIPT.exists():
-        print(f"[WARN] results parse script missing: {RESULTS_PARSE_SCRIPT}")
+        print(f"[WARN] results parse script missing. See: {RESULTS_PARSE_SCRIPT}")
         return
     cmd = [sys.executable, str(RESULTS_PARSE_SCRIPT), str(COMPILED_CSV)]
     run_subprocess(cmd, "results_parse.py")

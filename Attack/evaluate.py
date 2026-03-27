@@ -5,11 +5,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
+
+if __package__ is None or __package__ == "":
+    project_root = Path(__file__).resolve().parent.parent
+    project_root_str = str(project_root)
+    if project_root_str not in sys.path:
+        sys.path.insert(0, project_root_str)
+
 from Utility.embeddings import build_embedding_map, load_embeddings
 
 
@@ -292,7 +300,7 @@ def evaluate_attack(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate attack probes against clean gallery embeddings.")
+    parser = argparse.ArgumentParser(description="Score attack probes against clean gallery.")
     parser.add_argument("gallery_embeddings", type=Path)
     parser.add_argument("probe_embeddings", type=Path)
     parser.add_argument("attack_metadata_json", type=Path)

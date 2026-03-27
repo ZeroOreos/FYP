@@ -9,6 +9,8 @@ import cv2
 import onnxruntime as ort
 from insightface.app import FaceAnalysis
 
+from Utility.runtime import resolve_onnx_providers
+
 IMAGE_DIR = "/Users/jeromeharianto/Documents/School2/FYP/Images"
 
 TESTS = [
@@ -19,24 +21,32 @@ TESTS = [
         "ctx_id": -1,
     },
     {
-        "label": "buffalo_l_coreml_cpu",
-        "model": "buffalo_l",
-        "providers": ["CoreMLExecutionProvider", "CPUExecutionProvider"],
-        "ctx_id": 0,
-    },
-    {
         "label": "antelopev2_cpu",
         "model": "antelopev2",
         "providers": ["CPUExecutionProvider"],
         "ctx_id": -1,
     },
-    {
-        "label": "antelopev2_coreml_cpu",
-        "model": "antelopev2",
-        "providers": ["CoreMLExecutionProvider", "CPUExecutionProvider"],
-        "ctx_id": 0,
-    },
 ]
+
+try:
+    coreml_providers = resolve_onnx_providers("coreml")
+except RuntimeError:
+    coreml_providers = None
+else:
+    TESTS.extend([
+        {
+            "label": "buffalo_l_coreml_cpu",
+            "model": "buffalo_l",
+            "providers": coreml_providers,
+            "ctx_id": 0,
+        },
+        {
+            "label": "antelopev2_coreml_cpu",
+            "model": "antelopev2",
+            "providers": coreml_providers,
+            "ctx_id": 0,
+        },
+    ])
 
 def list_images(folder):
     exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}

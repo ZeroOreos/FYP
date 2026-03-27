@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# python3 Attack/materialize.py <dataset_dir> --step <attack_spec> --pair-input <atkpairs> --generator-script <script> -> attacked probe dataset + compact metadata
+# python3 Attack/materialize.py <dataset_dir> --step <attack_spec> --pair-input <atkpairs> [--generator-script <script>] -> attacked probe dataset + compact metadata
 
 from __future__ import annotations
 
@@ -11,20 +11,15 @@ from typing import Any
 
 import numpy as np
 
+if __package__ is None or __package__ == "":
+    project_root = Path(__file__).resolve().parent.parent
+    project_root_str = str(project_root)
+    if project_root_str not in sys.path:
+        sys.path.insert(0, project_root_str)
+
 from Attack.metadata import build_request_metadata, metadata_path, request_matches, write_attack_metadata
 from Utility.paths import resolve_dataset_context
-from Utility.runtime import run_subprocess
-
-
-ATTACK_METHODS = {
-    "advfacegan",
-    "faceshifter",
-    "fomm",
-    "liveportrait",
-    "mipgan",
-    "mordiff",
-    "simswap",
-}
+from Utility.runtime import ATTACK_METHODS, resolve_attack_generator_script, run_subprocess
 
 
 @dataclass(frozen=True)
@@ -187,18 +182,19 @@ def materialize_attack_dataset(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Materialize an attack probe dataset from attack pairs.")
+    parser = argparse.ArgumentParser(description="Build attack probe dataset.")
     parser.add_argument("dataset_dir", type=Path)
     parser.add_argument("--step", action="append", required=True)
     parser.add_argument("--pair-input", type=Path, required=True)
-    parser.add_argument("--generator-script", type=Path, required=True)
+    parser.add_argument("--generator-script", type=Path, default=None)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
     args.dataset_dir = args.dataset_dir.resolve()
     args.pair_input = args.pair_input.resolve()
-    args.generator_script = args.generator_script.resolve()
+    if args.generator_script is not None:
+        args.generator_script = args.generator_script.resolve()
     if args.output_dir is not None:
         args.output_dir = args.output_dir.resolve()
     return args
@@ -211,16 +207,13 @@ def main() -> None:
 
     dataset_dir = args.dataset_dir
     pair_input = args.pair_input
-    generator_script = args.generator_script
     step = parse_attack_step(args.step[0])
+    generator_script = resolve_attack_generator_script(step.name, args.generator_script)
 
     if not dataset_dir.exists():
         raise FileNotFoundError(dataset_dir)
     if not pair_input.exists():
         raise FileNotFoundError(pair_input)
-    if not generator_script.exists():
-        raise FileNotFoundError(generator_script)
-
     materialize_attack_dataset(
         dataset_dir=dataset_dir,
         step=step,

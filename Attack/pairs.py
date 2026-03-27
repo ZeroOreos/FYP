@@ -187,8 +187,8 @@ def save_attack_pairs(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate hard or semi-hard face-swap attack pair candidates from embeddings.")
-    parser.add_argument("embeddings_src", type=Path, help="Embeddings .npz path or result directory containing embeddings.npz")
+    parser = argparse.ArgumentParser(description="Build attack pairs from embeddings.")
+    parser.add_argument("embeddings_src", type=Path, help="Embeddings .npz or result dir.")
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--samples-per-identity-pair", type=int, default=3)
     parser.add_argument("--pairing-mode", choices=("hard", "semi_hard"), default="hard")
@@ -207,7 +207,7 @@ def main() -> None:
     out_json = output_dir / f"{prefix}_atkpairs.json"
 
     if out_npz.exists() or out_json.exists():
-        print(f"[WARN] attack pair output already exists, skipping: {out_npz}")
+        print(f"[WARN] Attack pair output exists. Skip: {out_npz}")
         return
 
     loaded = load_embeddings(embeddings_path)

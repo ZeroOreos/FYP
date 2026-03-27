@@ -311,7 +311,7 @@ def run_paused_subprocess(cmd: list[str], args: argparse.Namespace, *, main_labe
             prime_cpu_counters(proc)
 
     except KeyboardInterrupt:
-        print("\n[WARN] Interrupted by user.")
+        print("\n[WARN] Interrupted by user. Stop.")
         try:
             if was_paused:
                 continue_process_tree(proc)

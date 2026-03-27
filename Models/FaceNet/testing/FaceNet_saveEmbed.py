@@ -13,6 +13,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
 from facenet_pytorch import InceptionResnetV1
+from Utility.runtime import resolve_torch_device
 
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
@@ -99,22 +100,22 @@ def save_outputs(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Extract FaceNet embeddings from aligned face folders.")
+    parser = argparse.ArgumentParser(description="Extract FaceNet embeddings.")
     parser.add_argument("--data_root", type=str, required=True,
-                        help="Root folder of aligned CelebA identities")
+                        help="Aligned identity root")
     parser.add_argument("--output_dir", type=str, default="facenet_embeddings",
-                        help="Folder to save embeddings and metadata")
+                        help="Output dir")
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--image_size", type=int, default=160)
     parser.add_argument("--pretrained", type=str, default="vggface2",
                         choices=["vggface2", "casia-webface"],
-                        help="Pretrained FaceNet weights")
-    parser.add_argument("--device", type=str, default=None,
-                        help='Force device: "cpu" or "cuda". Default auto-detect')
+                        help="Pretrained weights")
+    parser.add_argument("--device", choices=("auto", "cuda", "mps", "cpu"), default=None,
+                        help="Force device")
     args = parser.parse_args()
 
-    device = args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_torch_device(args.device)
     print(f"[INFO] Using device: {device}")
 
     dataset = FaceFolderDataset(args.data_root, image_size=args.image_size)

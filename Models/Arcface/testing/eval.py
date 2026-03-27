@@ -6,6 +6,8 @@ from PIL import Image
 from torchvision import transforms
 from Arcface.testing.model import ArcFaceModel
 
+from Utility.runtime import resolve_torch_device
+
 
 def load_image(path, img_size=112):
     tf = transforms.Compose([
@@ -33,10 +35,7 @@ def cosine_compare(model, img1_path, img2_path, device):
 
 def main():
     checkpoint = torch.load("best_arcface.pth", map_location="cpu")
-    class_names = checkpoint["class_names"]
-    num_classes = len(class_names)
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(resolve_torch_device())
 
     model = ArcFaceModel().to(device)
     model.load_state_dict(checkpoint["model_state_dict"])

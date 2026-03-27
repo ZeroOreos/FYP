@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# python3 main_recognition.py <dataset_dir> -> cached recognition orchestration and result refresh
+# python3 main_recognition.py <dataset_dir> -> recognition pipeline
 
 from __future__ import annotations
 
@@ -10,8 +10,9 @@ from pathlib import Path
 from Utility.paths import derive_pairs_output_path, resolve_dataset_context
 from Utility.results_compile import rebuild_compiled_csv, rebuild_parsed_results
 from Utility.runtime import ALLOW_MISSING_PAIRS, MODELS, PAIRS_ROOT, PROJECT_ROOT, RESULTS_ROOT
+from Utility.runtime import DEFAULT_ONNX_PROVIDER, DEFAULT_TORCH_DEVICE
 from Utility.runtime import THROTTLE_BATCH_SIZE, MODEL_THROTTLE_DELAYS
-from Utility.runtime import ensure_dir, run_subprocess, validate_input_dataset, validate_model_registry
+from Utility.runtime import ensure_dir, run_subprocess, runtime_env_overrides, validate_input_dataset, validate_model_registry
 
 
 PAIRS_SCRIPT = PROJECT_ROOT / "Recognition" / "pairs.py"
@@ -19,8 +20,10 @@ VERIFY_SCRIPT = PROJECT_ROOT / "Recognition" / "evaluate.py"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run cached recognition orchestration.")
-    parser.add_argument("dataset_dir", type=Path, help="Dataset root to evaluate.")
+    parser = argparse.ArgumentParser(description="Run recognition pipeline.")
+    parser.add_argument("dataset_dir", type=Path, help="Dataset root.")
+    parser.add_argument("--torch-device", choices=("auto", "cuda", "mps", "cpu"), default=DEFAULT_TORCH_DEVICE)
+    parser.add_argument("--onnx-provider", choices=("auto", "coreml", "cuda", "cpu"), default=DEFAULT_ONNX_PROVIDER)
     args = parser.parse_args()
     args.dataset_dir = args.dataset_dir.resolve()
     return args
@@ -34,7 +37,7 @@ def metrics_output_path(variant_name: str, model_name: str) -> Path:
     return RESULTS_ROOT / variant_name / model_name / "metrics.json"
 
 
-def maybe_run_pairs(dataset_dir: Path) -> Path:
+def maybe_run_pairs(dataset_dir: Path, env_overrides: dict[str, str]) -> Path:
     pairs_file = derive_pairs_output_path(dataset_dir)
     ensure_dir(PAIRS_ROOT)
     if pairs_file.exists():
@@ -43,11 +46,18 @@ def maybe_run_pairs(dataset_dir: Path) -> Path:
     run_subprocess(
         [sys.executable, str(PAIRS_SCRIPT), str(dataset_dir), "--pairs-out", str(pairs_file)],
         f"pairs.py -> {pairs_file}",
+        extra_env=env_overrides,
     )
     return pairs_file
 
 
-def maybe_run_generate(dataset_dir: Path, variant_name: str, model: dict[str, Path], throttle: bool = False) -> Path:
+def maybe_run_generate(
+    dataset_dir: Path,
+    variant_name: str,
+    model: dict[str, Path],
+    env_overrides: dict[str, str],
+    throttle: bool = False,
+) -> Path:
     embeddings_file = embeddings_output_path(variant_name, model["name"])
     ensure_dir(embeddings_file.parent)
     if embeddings_file.exists():
@@ -62,11 +72,17 @@ def maybe_run_generate(dataset_dir: Path, variant_name: str, model: dict[str, Pa
         elif model["name"] == "InsightFace":
             cmd.append(str(delay))
 
-    run_subprocess(cmd, f"{model['name']} generate -> {embeddings_file}")
+    run_subprocess(cmd, f"{model['name']} generate -> {embeddings_file}", extra_env=env_overrides)
     return embeddings_file
 
 
-def maybe_run_evaluate(variant_name: str, model: dict[str, Path], pairs_file: Path, embeddings_file: Path) -> Path:
+def maybe_run_evaluate(
+    variant_name: str,
+    model: dict[str, Path],
+    pairs_file: Path,
+    embeddings_file: Path,
+    env_overrides: dict[str, str],
+) -> Path:
     metrics_file = metrics_output_path(variant_name, model["name"])
     ensure_dir(metrics_file.parent)
     if metrics_file.exists():
@@ -85,7 +101,7 @@ def maybe_run_evaluate(variant_name: str, model: dict[str, Path], pairs_file: Pa
     if ALLOW_MISSING_PAIRS:
         cmd.append("--allow-missing-pairs")
 
-    run_subprocess(cmd, f"{model['name']} evaluate -> {metrics_file}")
+    run_subprocess(cmd, f"{model['name']} evaluate -> {metrics_file}", extra_env=env_overrides)
     return metrics_file
 
 
@@ -96,18 +112,24 @@ def main() -> None:
     validate_model_registry(MODELS)
 
     context = resolve_dataset_context(dataset_dir)
+    env_overrides = runtime_env_overrides(
+        torch_device=args.torch_device,
+        onnx_provider=args.onnx_provider,
+    )
     print(f"[INFO] Variant: {context.variant_name}")
     print(f"[INFO] Referenced base root: {context.base_root_name}")
     print(f"[INFO] Shared pair file: {derive_pairs_output_path(dataset_dir)}")
+    print(f"[INFO] Torch device preference: {args.torch_device}")
+    print(f"[INFO] ONNX provider preference: {args.onnx_provider}")
 
     ensure_dir(PAIRS_ROOT)
     ensure_dir(RESULTS_ROOT)
 
-    pairs_file = maybe_run_pairs(dataset_dir)
+    pairs_file = maybe_run_pairs(dataset_dir, env_overrides)
     for model in MODELS:
         print(f"\n===== MODEL: {model['name']} =====")
-        embeddings_file = maybe_run_generate(dataset_dir, context.variant_name, model)
-        maybe_run_evaluate(context.variant_name, model, pairs_file, embeddings_file)
+        embeddings_file = maybe_run_generate(dataset_dir, context.variant_name, model, env_overrides)
+        maybe_run_evaluate(context.variant_name, model, pairs_file, embeddings_file, env_overrides)
 
     rebuild_compiled_csv()
     rebuild_parsed_results()

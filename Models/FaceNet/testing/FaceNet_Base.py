@@ -4,7 +4,9 @@ import torch.nn.functional as F
 from facenet_pytorch import MTCNN, InceptionResnetV1
 from PIL import Image
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from Utility.runtime import resolve_torch_device
+
+device = torch.device(resolve_torch_device())
 
 mtcnn = MTCNN(
     image_size=160,

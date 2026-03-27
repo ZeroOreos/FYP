@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     probe_group.add_argument("--probe-dir", type=Path, help="Existing attack probe dataset root.")
     probe_group.add_argument("--attack-method", type=str, help="Attack method token used to derive the probe root.")
 
-    parser.add_argument("--attack-generator-script", type=Path, default=None, help="Optional generator backend script.")
+    parser.add_argument("--attack-generator-script", type=Path, default=None, help="Optional generator backend script override.")
     parser.add_argument("--pair-model", type=str, default="InsightFace", help="Model used to generate attack pairs.")
     parser.add_argument("--top-k", type=int, default=5, help="Nearest non-match identities kept per victim.")
     parser.add_argument("--samples-per-identity-pair", type=int, default=3, help="Pairs kept per identity pair.")

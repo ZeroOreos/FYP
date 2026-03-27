@@ -76,10 +76,9 @@ def build_subcommand(args: argparse.Namespace) -> list[str]:
         validate_attack_steps(args.step)
         if not args.pair_input:
             raise ValueError("attack materialization requires --pair-input")
-        if not args.generator_script:
-            raise ValueError("attack materialization currently requires --generator-script")
         cmd.extend(["--pair-input", str(args.pair_input)])
-        cmd.extend(["--generator-script", str(args.generator_script)])
+        if args.generator_script:
+            cmd.extend(["--generator-script", str(args.generator_script)])
         if args.output_dir:
             cmd.extend(["--output-dir", str(args.output_dir)])
         if args.force:

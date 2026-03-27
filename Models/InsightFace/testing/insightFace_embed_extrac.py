@@ -5,8 +5,9 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
-import insightface
 from insightface.model_zoo import get_model
+
+from Utility.runtime import resolve_onnx_providers
 
 
 MAIN_DIR = "Dataset/CelebA/main"
@@ -16,10 +17,7 @@ MODEL_ROOT = os.path.expanduser("~/.insightface/models")
 
 MODEL_PACK = "antelopev2"
 
-PROVIDERS = [
-    "CoreMLExecutionProvider",
-    "CPUExecutionProvider",
-]
+PROVIDERS = resolve_onnx_providers()
 
 VALID_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
@@ -71,10 +69,10 @@ def find_recognition_model(model_root, pack_name):
     if len(candidates) == 1:
         return candidates[0]
     elif len(candidates) > 1:
-        print("[WARN] Multiple possible recognition models found:")
+        print("[WARN] Multiple recognition models found:")
         for c in candidates:
             print("   ", c)
-        print("[WARN] Using first candidate.")
+        print("[WARN] Using first match.")
         return candidates[0]
 
     raise RuntimeError(
@@ -182,7 +180,7 @@ def extract_embeddings(model, image_paths):
             kept_paths.append(path)
 
         except Exception as e:
-            print(f"[WARN] Failed on {path}: {e}")
+            print(f"[WARN] Failed: {path}: {e}")
             failed_paths.append(path)
 
     if not embeddings:
