@@ -18,10 +18,9 @@ Dataset/**/*.bmp
 Dataset/**/*.webp
 Dataset/**/*.npz
 Dataset/**/*.npy
-Results/*
+Results/**
 !Results/compiled_results.csv
-tmp/*
-!tmp/.gitkeep
+tmp/**
 !tmp/attack_workdirs/
 tmp/attack_workdirs/*
 !tmp/attack_workdirs/.gitkeep
@@ -29,7 +28,7 @@ tmp/attack_workdirs/*
 !tmp/attack_workdirs/*/.gitkeep
 
 # Local heavyweight checkpoints and support caches
-checkpoints/*
+checkpoints/**
 !checkpoints/.gitkeep
 !checkpoints/*/
 !checkpoints/*/.gitkeep
