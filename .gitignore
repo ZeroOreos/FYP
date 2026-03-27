@@ -1,13 +1,58 @@
-Images/test0.jpeg
+# macOS
+.DS_Store
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Local IDE / editor clutter
+.vscode/
+
+# Generated datasets and experiment outputs
+Dataset/**/*.jpg
+Dataset/**/*.jpeg
+Dataset/**/*.png
+Dataset/**/*.bmp
+Dataset/**/*.webp
+Dataset/**/*.npz
+Dataset/**/*.npy
 Results/*
 !Results/compiled_results.csv
-*.jpg
-*.png
-*.jpeg
-*.bmp
-*.webp
-*.npz
-*.npy
-*.pth
-*.pt
-.DS_Store
+tmp/*
+!tmp/.gitkeep
+!tmp/attack_workdirs/
+tmp/attack_workdirs/*
+!tmp/attack_workdirs/.gitkeep
+!tmp/attack_workdirs/*/
+!tmp/attack_workdirs/*/.gitkeep
+
+# Local heavyweight checkpoints and support caches
+checkpoints/*
+!checkpoints/.gitkeep
+!checkpoints/*/
+!checkpoints/*/.gitkeep
+
+# Regenerable local model testing outputs
+Models/*/testing/*.npz
+Models/*/testing/*.csv
+
+# Local scratch image kept from older notes
+Images/test0.jpeg
+
+# Upstream repo runtime outputs and downloaded archives
+external/*/.git.backup/
+external/*/output/
+external/*/tmp/
+external/*/temp/
+external/*/temp_results/
+external/*/checkpoints/
+external/*/arcface_model/
+external/*/antelope.zip
+external/REFace_upstream/assets/
+external/REFace_upstream/examples/
+external/SimSwap_upstream/crop_224/
+external/SimSwap_upstream/demo_file/
+external/SimSwap_upstream/docs/img/
+external/SimSwap_upstream/simswaplogo/

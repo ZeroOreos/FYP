@@ -29,9 +29,9 @@ ATTACK_METHODS = (
     "advfacegan",
     "faceshifter",
     "fomm",
-    "liveportrait",
     "mipgan",
     "mordiff",
+    "reface",
     "simswap",
 )
 ATTACK_GENERATOR_SCRIPTS = {

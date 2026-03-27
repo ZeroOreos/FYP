@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
+import shutil
+import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -39,6 +42,50 @@ def bootstrap_project_root(module_file: str | Path, parents: int = 3) -> Path:
     if project_root_str not in sys.path:
         sys.path.insert(0, project_root_str)
     return project_root
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+EXTERNAL_ROOT = PROJECT_ROOT / "external"
+CHECKPOINTS_ROOT = PROJECT_ROOT / "checkpoints"
+TMP_ATTACK_ROOT = PROJECT_ROOT / "tmp" / "attack_workdirs"
+
+
+@dataclass(frozen=True)
+class ExternalBackendDefaults:
+    method_slug: str
+    upstream_dir_name: str
+    default_entry_script: str | None = None
+    default_checkpoint: str | None = None
+    default_config: str | None = None
+
+    @property
+    def repo_dir(self) -> Path:
+        return EXTERNAL_ROOT / self.upstream_dir_name
+
+    @property
+    def checkpoint_dir(self) -> Path:
+        return CHECKPOINTS_ROOT / self.method_slug
+
+    @property
+    def work_dir(self) -> Path:
+        return TMP_ATTACK_ROOT / self.method_slug
+
+
+def external_backend_defaults(
+    method_slug: str,
+    upstream_dir_name: str,
+    *,
+    default_entry_script: str | None = None,
+    default_checkpoint: str | None = None,
+    default_config: str | None = None,
+) -> ExternalBackendDefaults:
+    return ExternalBackendDefaults(
+        method_slug=method_slug,
+        upstream_dir_name=upstream_dir_name,
+        default_entry_script=default_entry_script,
+        default_checkpoint=default_checkpoint,
+        default_config=default_config,
+    )
 
 
 def build_base_arg_parser(
@@ -80,6 +127,90 @@ def require_existing_paths(*paths: Path | None) -> None:
     for path in paths:
         if path is not None and not path.exists():
             raise FileNotFoundError(path)
+
+
+def ensure_dir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def path_exists_or_none(path: Path | None) -> Path | None:
+    if path is None or not path.exists():
+        return None
+    return path
+
+
+def resolve_existing_path(value: Path | None) -> Path | None:
+    if value is None:
+        return None
+    resolved = value.resolve()
+    return resolved if resolved.exists() else None
+
+
+def resolve_external_backend_args(
+    args: argparse.Namespace,
+    *,
+    defaults: ExternalBackendDefaults,
+    repo_env: str,
+    entry_env: str | None = None,
+    checkpoint_env: str | None = None,
+    config_env: str | None = None,
+) -> argparse.Namespace:
+    args = finalize_generator_args(
+        args,
+        optional_path_fields=(
+            "repo_dir",
+            "entry_script",
+            "checkpoint",
+            "config",
+            "work_dir",
+        ),
+    )
+
+    repo_dir = resolve_path_arg(getattr(args, "repo_dir", None), repo_env)
+    if repo_dir is None:
+        repo_dir = path_exists_or_none(defaults.repo_dir)
+    args.repo_dir = repo_dir
+
+    entry_script = resolve_path_arg(getattr(args, "entry_script", None), entry_env) if entry_env else getattr(args, "entry_script", None)
+    if entry_script is None and defaults.default_entry_script and repo_dir is not None:
+        entry_script = path_exists_or_none(repo_dir / defaults.default_entry_script)
+    args.entry_script = resolve_existing_path(entry_script)
+
+    checkpoint = resolve_path_arg(getattr(args, "checkpoint", None), checkpoint_env) if checkpoint_env else getattr(args, "checkpoint", None)
+    if checkpoint is None and defaults.default_checkpoint:
+        checkpoint = path_exists_or_none(defaults.checkpoint_dir / defaults.default_checkpoint)
+    args.checkpoint = resolve_existing_path(checkpoint)
+
+    config = resolve_path_arg(getattr(args, "config", None), config_env) if config_env else getattr(args, "config", None)
+    if config is None and defaults.default_config and repo_dir is not None:
+        config = path_exists_or_none(repo_dir / defaults.default_config)
+    args.config = resolve_existing_path(config)
+
+    work_dir = getattr(args, "work_dir", None)
+    args.work_dir = work_dir if work_dir is not None else defaults.work_dir
+    return args
+
+
+def external_backend_extra_lines(
+    *,
+    repo_dir: Path | None,
+    entry_script: Path | None,
+    checkpoint: Path | None = None,
+    config: Path | None = None,
+    note: str | None = None,
+) -> tuple[str, ...]:
+    lines = [
+        f"repo_dir: {repo_dir}" if repo_dir is not None else "repo_dir: missing",
+        f"entry_script: {entry_script}" if entry_script is not None else "entry_script: missing",
+    ]
+    if checkpoint is not None:
+        lines.append(f"checkpoint: {checkpoint}")
+    if config is not None:
+        lines.append(f"config: {config}")
+    if note:
+        lines.append(note)
+    return tuple(lines)
 
 
 def set_global_seed(seed: int, *, include_torch: bool = False) -> None:
@@ -207,6 +338,110 @@ def print_run_header(
     print(f"[INFO] pairs: {num_pairs}")
     for line in extra_lines:
         print(f"[INFO] {line}")
+
+
+def resolve_path_arg(value: Path | None, env_name: str | None = None) -> Path | None:
+    if value is not None:
+        return value.resolve()
+    if env_name is None:
+        return None
+    raw = os.environ.get(env_name)
+    if not raw:
+        return None
+    return Path(raw).resolve()
+
+
+def run_command(
+    cmd: list[str],
+    *,
+    cwd: Path | None = None,
+    env_updates: dict[str, str] | None = None,
+    stage_name: str | None = None,
+) -> None:
+    label = stage_name or Path(cmd[0]).name
+    print(f"[RUN] {label}")
+    print("[CMD]", " ".join(cmd))
+    env = None
+    if env_updates:
+        env = {**os.environ, **env_updates}
+    subprocess.run(cmd, check=True, cwd=str(cwd) if cwd is not None else None, env=env)
+
+
+def prepare_pair_workdir(work_root: Path, index: int) -> Path:
+    pair_dir = work_root / f"{index:05d}"
+    if pair_dir.exists():
+        shutil.rmtree(pair_dir)
+    pair_dir.mkdir(parents=True, exist_ok=True)
+    return pair_dir
+
+
+def copy_image_file(src: Path, dst: Path) -> Path:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    return dst
+
+
+def replace_tokens(value: str, mapping: dict[str, str]) -> str:
+    result = value
+    for key, replacement in mapping.items():
+        result = result.replace(f"{{{key}}}", replacement)
+    return result
+
+
+def build_extra_args(extra_args: Sequence[str], mapping: dict[str, str]) -> list[str]:
+    return [replace_tokens(value, mapping) for value in extra_args]
+
+
+def find_first_existing_file(candidates: Sequence[Path]) -> Path | None:
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def find_latest_file(root: Path, patterns: Sequence[str]) -> Path | None:
+    matches: list[Path] = []
+    for pattern in patterns:
+        matches.extend(sorted(root.glob(pattern)))
+    if not matches:
+        return None
+    return max(matches, key=lambda path: path.stat().st_mtime)
+
+
+def create_still_video_ffmpeg(image_path: Path, video_path: Path, *, seconds: float = 1.0, fps: int = 25) -> Path:
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-loop",
+        "1",
+        "-i",
+        str(image_path),
+        "-t",
+        str(seconds),
+        "-r",
+        str(fps),
+        "-pix_fmt",
+        "yuv420p",
+        str(video_path),
+    ]
+    run_command(cmd, stage_name="ffmpeg still->video")
+    return video_path
+
+
+def extract_first_frame_ffmpeg(video_path: Path, image_path: Path) -> Path:
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(video_path),
+        "-frames:v",
+        "1",
+        str(image_path),
+    ]
+    run_command(cmd, stage_name="ffmpeg video->frame")
+    return image_path
 
 
 def load_image_array(path: Path, image_size: int) -> np.ndarray:

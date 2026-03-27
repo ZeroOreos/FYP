@@ -8,10 +8,6 @@ Quick check:
   MIT
   Good vendor candidate
 
-- LivePortrait
-  Appears MIT
-  Good vendor candidate, re-check upstream when integrating
-
 - SimSwap
   Non-commercial / research-use oriented
   Fine for FYP research use
@@ -20,6 +16,10 @@ Quick check:
 - FaceShifter
   License depends on the exact codebase used
   Check before vendoring
+
+- REFace
+  MIT
+  Good modern face-swap candidate if checkpoints stay available
 
 - AdvFaceGAN
   Check before vendoring
@@ -42,6 +42,7 @@ Quick check:
 
 Rule of thumb:
 
-- Prefer FOMM and LivePortrait for clean native vendoring
+- Prefer FOMM for clean native vendoring
 - Treat SimSwap as research-only unless licensing is clarified further
+- Prefer REFace over FaceShifter when a modern reproducible swap baseline is needed
 - Do not vendor weights until their redistribution terms are confirmed

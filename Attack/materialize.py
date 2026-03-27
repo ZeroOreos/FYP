@@ -111,7 +111,7 @@ def expected_output_path(output_dir: Path, row: dict[str, str]) -> Path:
     return output_dir / row["victim_identity"] / Path(row["attacker_image"]).name
 
 
-def run_generator(dataset_dir: Path, pair_input: Path, output_dir: Path, generator_script: Path) -> None:
+def run_generator(dataset_dir: Path, pair_input: Path, output_dir: Path, generator_script: Path, step: AttackStep) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     records_path = output_dir / "_generator_records.json"
     cmd = [
@@ -122,6 +122,13 @@ def run_generator(dataset_dir: Path, pair_input: Path, output_dir: Path, generat
         str(output_dir),
         str(records_path),
     ]
+    for key, value in step.params.items():
+        flag = f"--{key.replace('_', '-')}"
+        if isinstance(value, bool):
+            if value:
+                cmd.append(flag)
+            continue
+        cmd.extend([flag, str(value)])
     run_subprocess(cmd, f"attack generator -> {output_dir}")
 
 
@@ -153,7 +160,7 @@ def materialize_attack_dataset(
             )
 
     pair_rows = load_attack_pairs(pair_input)
-    run_generator(dataset_dir, pair_input, output_dir, generator_script)
+    run_generator(dataset_dir, pair_input, output_dir, generator_script, step)
 
     failures: list[dict[str, str]] = []
     num_written = 0

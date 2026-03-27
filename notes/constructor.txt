@@ -4,6 +4,7 @@
 - Priority task: face-swap and reenactment attacks against face verification
 - Main question: can manipulated probes be accepted as the victim identity
 - Secondary tasks: recognition robustness, privacy protection, readable benchmarking
+- Documentation rule: every attack backend must keep an exact adaptation log in `notes/model_adaptations.txt`
 
 ## Writing Style Contract
 - Target: README text, code comments, short docs, usage notes, warning text, CLI help text when practical
@@ -184,6 +185,14 @@
 - Attack generators must write all effective parameters to metadata
 - Attack generators must not silently rename files
 - Attack generators must not silently drop samples without logging
+- Every backend added or patched must append an entry to `notes/model_adaptations.txt`
+- The adaptation entry must state:
+- upstream repo used
+- checkpoints and extra assets used
+- local files patched
+- exact verification command
+- exact runtime blockers encountered
+- blunt fidelity note: faithful / patched / approximation / blocked
 - If a sample fails, it must be recorded explicitly in metadata
 - Skip philosophy: if output + metadata already exist, compare metadata against the current execution request
 - If metadata matches, skip reuse is allowed
@@ -204,18 +213,38 @@
 - Priority shortlist should cover the main attack families relevant to face verification:
 - Face swap:
 - `simswap`: practical high-fidelity face-swap baseline
-- `faceshifter`: stronger occlusion-aware face-swap baseline
+- `reface`: preferred modern diffusion-based face-swap baseline with released checkpoints
+- `faceshifter`: historical stronger occlusion-aware face-swap baseline, but currently blocked by missing trustworthy checkpoints
+- If `reface` proves too heavy or awkward to reproduce:
+- `hififace`: stronger paper-level swap alternative, but current usable code path is unofficial
 - Reenactment:
 - `fomm`: canonical lightweight reenactment baseline
-- `liveportrait`: stronger recent portrait-animation / reenactment baseline
 - Adversarial impersonation:
 - `advfacegan`: recent dual-identity impersonation model; especially relevant for source-preservation-aware evaluation
 - Morphing:
-- `mipgan`: representative GAN-based morphing baseline
-- `mordiff`: representative diffusion-based morphing baseline
+- `dim`: preferred modern diffusion-based morphing baseline
+- `mordiff`: secondary diffusion-based morphing baseline already aligned with the repo
+- `mipgan`: optional legacy GAN-based morphing baseline
+- Current family-complete benchmark target:
+- `simswap`
+- `reface`
+- `advfacegan`
+- `fomm`
+- `dim`
+- `mordiff`
+- optional: `mipgan`
 - Keep method names simple and stable at the CLI / path level
 - Avoid a heavy per-method spec layer unless the pipeline genuinely needs it
 - Methods may still rely on external backends or generator scripts
+- In paper writing and repo notes, every method must be labeled explicitly as one of:
+- faithful upstream
+- patched upstream
+- approximation / best attempt
+- blocked / unverified
+- Compatibility target:
+- attack backends should be pushed toward both CUDA-compatible and Apple/CoreML-friendly execution paths where practical
+- CPU-only patches are acceptable for verification and debugging, but should not be treated as the final target state when a cleaner accelerated path is possible
+- Current note: the attack-model side is the main area that has not yet been fully vetted for accelerator compatibility
 
 ## Gallery / Probe
 - Recognition mode may still use one dataset root symmetrically
