@@ -4,8 +4,8 @@ This entrypoint is the FYP-facing wrapper for FaceShifter.
 
 - Canonical pipeline entrypoint: `generate.py`
 - Wrapper implementation: `wrapper.py`
-- Expected preserved upstream location: `external/FaceShifter_upstream/`
-- Expected checkpoints location: `checkpoints/faceshifter/`
+- Expected backend source location: `Backends/sources/FaceShifter_upstream/`
+- Expected backend assets location: `Backends/assets/faceshifter/`
 
 Fidelity note:
 

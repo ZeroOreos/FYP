@@ -4,8 +4,8 @@ This entrypoint is the FYP-facing wrapper for MorDIFF.
 
 - Canonical pipeline entrypoint: `generate.py`
 - Wrapper implementation: `wrapper.py`
-- Expected preserved upstream location: `external/MorDIFF_upstream/`
-- Expected checkpoints location: `checkpoints/mordiff/`
+- Expected backend source location: `Backends/sources/MorDIFF_upstream/`
+- Expected backend assets location: `Backends/assets/mordiff/`
 
 Fidelity note:
 

@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
 
 def build_command(args: argparse.Namespace, source_path: Path, driving_video: Path, pair_dir: Path) -> tuple[list[str], Path]:
     if args.entry_script is None or args.config is None or args.checkpoint is None:
-        raise ValueError("FOMM wrapper needs an entry script, config, and checkpoint. Put the upstream repo in external/ and weights in checkpoints/, or pass them explicitly.")
+        raise ValueError("FOMM wrapper needs an entry script, config, and checkpoint. Put the backend source in Backends/sources/ and weights in Backends/assets/, or pass them explicitly.")
     result_video = pair_dir / "result.mp4"
     cmd = [
         args.python_bin,

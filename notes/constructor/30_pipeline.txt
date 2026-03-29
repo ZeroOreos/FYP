@@ -1,0 +1,26 @@
+# Constructor Pipelines
+
+Recognition pipeline
+- Input: one dataset root
+- Flow: pairs -> embeddings -> verification metrics -> compiled results -> parsed tables
+- Reuse cached outputs when present
+- Model-specific scripts generate embeddings only
+- Shared evaluation route goes through `Recognition/evaluate.py`
+
+Attack pipeline
+- Input: clean gallery root plus attack method configuration
+- Flow:
+- clean gallery embeddings
+- attack pair generation
+- attacked probe materialization via `modifier.py`
+- attacked probe embeddings
+- attack verification metrics
+- compiled results
+- parsed tables
+- Every stage should skip when its target already exists and is still valid
+
+Pairing
+- `Attack/pairs.py` input: embeddings file or model result directory
+- Output: `<variant>_<model>_atkpairs.npz` and `.json`
+- Pairing basis: identity centroid cosine similarity, then image cosine similarity
+- Support at least `hard` and `semi_hard`

@@ -1,0 +1,35 @@
+# Constructor Attack Design
+
+Attack shortlist
+- Face swap:
+- `simswap`
+- `reface`
+- `faceshifter`
+- Reenactment:
+- `fomm`
+- Adversarial impersonation:
+- `advfacegan`
+- Morphing:
+- `dim`
+- `mordiff`
+- optional `mipgan`
+
+Working benchmark target
+- `simswap`
+- `reface`
+- `advfacegan`
+- `fomm`
+- `dim`
+- `mordiff`
+- optional: `mipgan`
+
+Method labeling rule
+- In docs and writing, label each backend as one of:
+- faithful upstream
+- patched upstream
+- approximation / best attempt
+- blocked / unverified
+
+Compatibility target
+- Attack backends should move toward both CUDA-compatible and Apple/CoreML-friendly execution where practical
+- CPU-only patches are acceptable for verification and debugging, but not the ideal final state

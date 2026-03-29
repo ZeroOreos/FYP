@@ -4,8 +4,8 @@ This entrypoint is the FYP-facing wrapper for First Order Motion Model.
 
 - Canonical pipeline entrypoint: `generate.py`
 - Wrapper implementation: `wrapper.py`
-- Expected preserved upstream location: `external/FOMM_upstream/`
-- Expected checkpoints location: `checkpoints/fomm/`
+- Expected backend source location: `Backends/sources/FOMM_upstream/`
+- Expected backend assets location: `Backends/assets/fomm/`
 
 Fidelity note:
 

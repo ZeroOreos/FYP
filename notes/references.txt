@@ -1,12 +1,17 @@
 FYP references
 
-Maintenance note:
-- Keep appending useful references here.
-- Prefer not to delete old entries; if something is outdated, duplicated, or wrong, mark it clearly instead.
-- When a reference is used in code, evaluation design, or writing, add a short "used for" note.
-- TODO for future me: keep updating these references as the attack-evaluation section evolves.
+Notes contract
+- Constructor docs live under `notes/constructor/`
+- Working logs live under `notes/working/`
+- References stay here in `notes/references.txt`
 
-Format:
+Maintenance note
+- Keep appending useful references here
+- Prefer not to delete old entries; if something is outdated, duplicated, or wrong, mark it clearly instead
+- When a reference is used in code, evaluation design, or writing, add a short `Used for` note
+- Keep this file clean but detailed
+
+Format
 - [status] Citation / link
   Used for: short note
   Notes: short annotation
@@ -16,7 +21,7 @@ Core verification / recognition
 - [active] Liu, Z., Luo, P., Wang, X., and Tang, X. (2015). Deep Learning Face Attributes in the Wild. ICCV.
   Link: https://openaccess.thecvf.com/content_iccv_2015/html/Liu_Deep_Learning_Face_ICCV_2015_paper.html
   Used for: CelebA dataset reference.
-  Notes: Keep because the project appears to use CelebA-derived identities/images.
+  Notes: Keep because the project appears to use CelebA-derived identities and images.
 
 - [active] Schroff, F., Kalenichenko, D., and Philbin, J. (2015). FaceNet: A Unified Embedding for Face Recognition and Clustering. CVPR.
   Link: https://openaccess.thecvf.com/content_cvpr_2015/html/Schroff_FaceNet_A_Unified_2015_CVPR_paper.html
@@ -48,118 +53,73 @@ Attack evaluation / further reading
 - [active] Wang, Y. et al. (2021). HifiFace: 3D Shape and Semantic Prior Guided High Fidelity Face Swapping.
   Link: https://johann.wang/HifiFace/
   Used for: FaceShifter replacement candidate in the face-swap category.
-  Notes: Strong paper-level alternative when a higher-fidelity swap baseline is needed. The project page presents `HifiFace-512`, but the code we found is unofficial: `maum-ai/hififace` with a published pretrained checkpoint and BSD-3-Clause license. Good fallback if we accept an unofficial implementation caveat.
+  Notes: Strong paper-level alternative when a higher-fidelity swap baseline is needed. The project page presents `HifiFace-512`, but the code found was unofficial: `maum-ai/hififace` with a published pretrained checkpoint and BSD-3-Clause license.
 
 - [active] Baliah, S. et al. (2024). Realistic and Efficient Face Swapping: A Unified Approach with Diffusion Models.
   Link: https://github.com/Sanoojan/REFace
   Used for: preferred modern face-swap replacement for FaceShifter and main diffusion-based face-swap candidate in this FYP.
-  Notes: Official repo, MIT license, and the README states that checkpoints and dependencies were released on September 14, 2024. This is the current keep direction for the face-swap category when a modern reproducible baseline is needed.
-
+  Notes: Official repo, MIT license, and the README states that checkpoints and dependencies were released on September 14, 2024.
 
 - [active] Huang, Y. et al. (2025). AdvFaceGAN: a face dual-identity impersonation attack method based on generative adversarial networks. PeerJ Computer Science.
   Link: https://pmc.ncbi.nlm.nih.gov/articles/PMC12192821/
   Used for: motivating dual reporting of target success and source-identity preservation; also used for constructor shortlist and `advfacegan` backend scaffold.
-  Notes: Strongly relevant to the "attack should still look like the source" discussion. License: verify before vendoring.
+  Notes: Strongly relevant to source-preservation-aware evaluation.
 
 - [active] Kessler, C. et al. (2024). Face morphing attack vulnerability / pair-selection analysis paper.
   Link: https://pmc.ncbi.nlm.nih.gov/articles/PMC11142600/
-  Used for: supporting clean-pair difficulty stratification; useful evidence that embedding-based pair similarity changes attackability.
+  Used for: supporting clean-pair difficulty stratification.
   Notes: Helpful when justifying clean-margin bins and not relying on a single pooled ASR.
 
 - [active] Venkatesh, S. et al. (2020). Worst-Case Morphs Using Wasserstein ALI and Improved MIPGAN.
   Link: https://research.utwente.nl/en/publications/worst-case-morphs-using-wasserstein-ali-and-improved-mipgan-2
   Used for: constructor attack shortlist and `mipgan` backend scaffold.
-  Notes: Representative GAN-based morphing attack line for biometric verification. License: code access appears controlled.
+  Notes: Representative GAN-based morphing attack line for biometric verification.
 
 - [active] Venkatesh, S. et al. (2024). MorDIFF: Recognition Vulnerability and Attack Detectability of Face Morphing Attacks Created by Diffusion Autoencoders.
   Link: https://publica.fraunhofer.de/entities/publication/704bfa7d-dc16-43fa-b933-e054396b4321
   Used for: constructor attack shortlist and `mordiff` backend scaffold.
-  Notes: Representative recent diffusion morphing attack line. License: often research-only / non-commercial.
+  Notes: Representative recent diffusion morphing attack line.
 
 - [active] Blasingame, Z. W. and Liu, C. (2024). DiM: Diffusion Morphs.
   Link: https://zblasingame.github.io/DiM/
   Used for: preferred modern morphing replacement / addition in the FYP shortlist.
-  Notes: Newer diffusion-based morphing direction than MIPGAN and a stronger "current trend" fit for a 2026-facing benchmark. Treat as the priority morphing candidate if runnable code and checkpoints are available.
-
-- [active] InsightFace / INSwapper licensing notes.
-  Link: https://github.com/deepinsight/insightface
-  Used for: SimSwap-adjacent workaround analysis and possible swap-backend alternatives.
-  Notes: InsightFace code is MIT, but released models are restricted.
-
-- [active] FaceSwap project licensing notes.
-  Link: https://github.com/deepfakes-models/faceswap-models
-  Used for: open-source alternative to SimSwap when a more clearly redistributable swap stack is preferred.
-  Notes: GPL-3.0.
+  Notes: Strong current-trend morphing candidate if runnable code and checkpoints are available.
 
 Implementation provenance used in this repo
 
 - [active] neuralchen/SimSwap repository.
   Link: https://github.com/neuralchen/SimSwap
-  Used for: `external/SimSwap_upstream/`, local `simswap` wrapper, and verified swap generation in this repo.
-  Notes: Official SimSwap repository. The README states training and test code are available and that SimSwap-HQ checkpoints were released. Local verification used the upstream repo plus its published ArcFace and generator assets, with small CPU-compatibility patches in our wrapper path.
+  Used for: `Backends/sources/SimSwap_upstream/`, local `simswap` wrapper, and verified swap generation in this repo.
+  Notes: Official SimSwap repository. Local verification used the upstream repo plus its published ArcFace and generator assets, with small CPU-compatibility patches in the wrapper path.
 
 - [active] AliaksandrSiarohin/first-order-model repository.
   Link: https://github.com/AliaksandrSiarohin/first-order-model
-  Used for: `external/FOMM_upstream/` and the local `fomm` wrapper.
-  Notes: Official FOMM repository. The local verified checkpoint came from a clean Hugging Face mirror after the original asset path produced corrupted downloads during setup. Keep that caveat in the methods section if exact resource provenance is discussed.
+  Used for: `Backends/sources/FOMM_upstream/` and the local `fomm` wrapper.
+  Notes: Official FOMM repository. The local verified checkpoint came from a clean Hugging Face mirror after the original asset path produced corrupted downloads during setup.
 
 - [active] maum-ai/faceshifter repository.
   Link: https://github.com/maum-ai/faceshifter
-  Used for: `external/FaceShifter_upstream/` and the local `faceshifter` wrapper scaffold.
-  Notes: Unofficial PyTorch implementation of FaceShifter focused on AEI-Net. No trustworthy pretrained AEI checkpoint was found during setup, so this backend is present but not part of the verified working set.
-
-- [active] maum-ai/hififace repository.
-  Link: https://github.com/maum-ai/hififace
-  Used for: replacement analysis for FaceShifter.
-  Notes: Unofficial HifiFace implementation, but the README provides an inference checkpoint link and explicit inference commands. This makes it a more practical replacement candidate than FaceShifter if we accept the unofficial-code caveat.
+  Used for: `Backends/sources/FaceShifter_upstream/` and the local `faceshifter` wrapper scaffold.
+  Notes: Unofficial PyTorch implementation of FaceShifter focused on AEI-Net. No trustworthy pretrained AEI checkpoint was found during setup.
 
 - [active] Sanoojan/REFace repository.
   Link: https://github.com/Sanoojan/REFace
-  Used for: `external/REFace_upstream/`, `Modifiers/attack/reface/`, and the verified modern face-swap backend in this repo.
-  Notes: Official REFace implementation. Local verification succeeded on March 27, 2026 using the official repo, official checkpoint, official dependency bundle, and local cache seeding for CLIP and Torch assets. See `notes/model_adaptations.txt` for the exact compatibility patches and runtime fixes that were needed.
+  Used for: `Backends/sources/REFace_upstream/`, `Modifiers/attack/reface/`, and the verified modern face-swap backend in this repo.
+  Notes: Official REFace implementation. See `notes/working/20_backend_adaptations.txt` for the exact compatibility patches and runtime fixes.
 
 - [active] Local implementation adaptation log.
-  Link: `notes/model_adaptations.txt`
+  Link: `notes/working/20_backend_adaptations.txt`
   Used for: paper methods section, reproducibility appendix, and implementation honesty notes.
-  Notes: This file records the exact local patches, cache seeding, CPU/offline adaptations, and verification commands used to make each upstream model run in this repo. Update it for every past and future model.
+  Notes: This file records the exact local patches, cache seeding, CPU/offline adaptations, and verification commands used to make each upstream model run in this repo.
+
+Context and interpretation
 
 - [active] Altuncu, D. et al. (2025). Advancing facial recognition security through adversarial attack research and standardization. Scientific Reports.
   Link: https://www.nature.com/articles/s41598-025-15753-8
-  Used for: threshold-aware reporting language; useful when tying attack evaluation back to FAR/TAR style verification metrics.
+  Used for: threshold-aware reporting language and FAR/TAR framing.
   Notes: Good bridge reference between attack work and verification evaluation practice.
 
 - [active] Wang, X., Wu, Y. C., Zhou, M., and Fu, H. F. (2024). Beyond surveillance: privacy, ethics, and regulations in face recognition technology. Frontiers in Big Data.
   Link: https://www.frontiersin.org/journals/big-data/articles/10.3389/fdata.2024.1337465/full
-  Used for: broader context and framing; not central for metrics, but useful for motivation and discussion sections.
-  Notes: Keep as context rather than as a technical metric source.
-
-Presentation / interpretation notes from recent reading
-
-- [active] Current working shortlist for the paper.
-  Used for: methods chapter and implementation priority.
-  Notes: Family-complete target set is `simswap`, `reface`, `advfacegan`, `fomm`, `dim`, `mordiff`, with `mipgan` optional as the older GAN morph baseline. Keep `fomm` analytically separate as reenactment rather than mixing it directly into swap/morph conclusions.
-
-- [active] Current verified working set in this repo as of March 27, 2026.
-  Used for: methods chapter truthfulness and experiment-scoping decisions.
-  Notes: Verified working set is `simswap`, `fomm`, and `reface`. `faceshifter` is blocked by missing trustworthy pretrained weights. `advfacegan`, `mordiff`, `mipgan`, and `dim` are not yet part of the verified working set. Exact local adaptations are tracked in `notes/model_adaptations.txt`.
-
-- [active] Useful presentation pattern from the papers above:
-  Used for: attack tables and parsed CSV design.
-  Notes: Present at least (1) headline ASR, (2) constrained ASR or source-preserving ASR, (3) clean difficulty summary, and (4) difficulty-stratified results. Avoid presenting only one pooled ASR number.
-
-- [active] Verification results are easiest to digest when tied back to the decision threshold.
-  Used for: mean clean margin, residual margin, FAR-conditioned ASR, and clean-margin bins.
-  Notes: This is a synthesis note from the attack + verification literature above, not a standalone citation.
-
-Legacy entries preserved from older notes
-
-- [legacy-keep] "arcface" entry in the previous version of this file duplicated the CelebA citation.
-  Used for: historical note only.
-  Notes: Keep this reminder so we do not accidentally cite the wrong paper again.
-
-- [legacy-keep] Progress note from previous file:
-  Used for: local experiment history.
-  Notes:
-  initially too aggressive lr on backbone; caused 0.0 acc for 10 ep
-  reduced lr to 1e-4; got 0.03 acc after 10 ep
-  added softmax and freezing, got 45 val acc after 12 ep and plateaued; train acc is 0.99
+  Used for: broader context and framing.
+  Notes: Useful for motivation and discussion rather than metrics.

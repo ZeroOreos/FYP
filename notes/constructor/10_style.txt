@@ -1,0 +1,32 @@
+# Constructor Style Rules
+
+Writing style
+- Human, sharp, plain, low-clutter
+- Clarity first, brevity second, completeness third
+- Avoid filler, tutorial voice, and paragraph sprawl
+
+README and doc style
+- Start with what the repo does
+- Then main entry points
+- Then model and backend rules
+- Then install and run commands
+- Then minimal layout notes
+- Prefer bullets and code blocks over long prose
+
+Comment style
+- Comments must earn their keep
+- Use comments for intent, invariants, contracts, hidden assumptions, and failure semantics
+- Do not comment obvious syntax
+- Keep comments short
+
+Warning and error text
+- Be direct
+- Say what failed and why
+- Give a short recovery hint only when useful
+- Avoid vague lines like `something went wrong`
+
+Formatting
+- Prefer flat bullets
+- Keep headings short
+- Prefer stable repo terms
+- Avoid synonym drift across docs and CLI help

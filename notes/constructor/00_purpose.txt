@@ -1,0 +1,22 @@
+# Constructor Purpose
+
+Goal
+- Priority task: face-swap and reenactment attacks against face verification
+- Main question: can manipulated probes be accepted as the victim identity
+- Secondary tasks: recognition robustness, privacy protection, readable benchmarking
+
+Notes contract
+- Constructor docs live under `notes/constructor/`
+- Working logs live under `notes/working/`
+- References stay in `notes/references.txt`
+- Every attack backend must keep an exact adaptation log in `notes/working/20_backend_adaptations.txt`
+- End-state cleanup rule: once backend documentation is properly centralized in constructor, working, and references, per-model status clutter in READMEs should be deleted or cleaned up rather than left duplicated
+
+Entry points
+- `main_recognition.py`: recognition / verification pipeline
+- `main_attack.py`: attack-verification pipeline
+- `modifier.py`: dataset materialization wrapper
+
+Slowed entry points
+- `slowed/main_recognition_slowed.py`
+- `slowed/main_attack_slowed.py`

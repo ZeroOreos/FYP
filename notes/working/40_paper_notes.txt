@@ -1,0 +1,25 @@
+# Paper Notes
+
+Current working shortlist
+- Family-complete target set is `simswap`, `reface`, `advfacegan`, `fomm`, `dim`, `mordiff`, with `mipgan` optional as the older GAN morph baseline
+- Keep `fomm` analytically separate as reenactment rather than mixing it directly into swap or morph conclusions
+
+Current verified working set as of 2026-03-27
+- Verified working set is `simswap`, `fomm`, and `reface`
+- `faceshifter` is blocked by missing trustworthy pretrained weights
+- `advfacegan`, `mordiff`, `mipgan`, and `dim` are not yet part of the verified working set
+
+Presentation notes
+- Present at least:
+- headline ASR
+- constrained ASR or source-preserving ASR
+- clean difficulty summary
+- difficulty-stratified results
+- Avoid presenting only one pooled ASR number
+- Verification results are easiest to digest when tied back to the decision threshold
+- Useful derived reporting targets include mean clean margin, residual margin, FAR-conditioned ASR, and clean-margin bins
+
+Legacy progress note preserved from older notes
+- initially too aggressive learning rate on backbone; caused `0.0` accuracy for 10 epochs
+- reduced learning rate to `1e-4`; got `0.03` accuracy after 10 epochs
+- added softmax and freezing; got `45` validation accuracy after 12 epochs and plateaued while train accuracy reached `0.99`

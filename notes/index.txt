@@ -1,0 +1,12 @@
+# Notes Index
+
+Primary notes structure:
+- `notes/constructor/`: top-down constructor docs for learned users and models
+- `notes/working/`: detailed working records, implementation detail, backend adaptations, and paper-useful notes
+- `notes/references.txt`: clean but detailed references
+
+Rules:
+- Constructor files should orient, partition, and explain the repo from top down
+- Working files should preserve detail now and optimize for later filtering
+- References should stay in one file and should not absorb implementation logs
+- Avoid `README` naming here unless a tool requires it

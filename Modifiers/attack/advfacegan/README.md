@@ -6,8 +6,8 @@ Current status:
 
 - The canonical pipeline entrypoint is `generate.py`.
 - The implementation logic lives in `wrapper.py`.
-- Expected preserved upstream location is `external/AdvFaceGAN_upstream/`.
-- Expected checkpoints location is `checkpoints/advfacegan/`.
+- Expected backend source location is `Backends/sources/AdvFaceGAN_upstream/`.
+- Expected backend assets location is `Backends/assets/advfacegan/`.
 
 Important fidelity note:
 

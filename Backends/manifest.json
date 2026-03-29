@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "layout": {
+    "backends_root": "Backends",
+    "sources_root": "Backends/sources",
+    "dependencies_root": "Backends/sources/dependencies",
+    "assets_root": "Backends/assets",
+    "workdirs_root": "Backends/workdirs"
+  },
+  "entries": [
+    {
+      "name": "advfacegan",
+      "kind": "backend",
+      "status": "scaffolded",
+      "repo_dir": "Backends/sources/AdvFaceGAN_upstream",
+      "upstream_label": "AdvFaceGAN preserved upstream snapshot",
+      "notes_ref": "notes/working/20_backend_adaptations.txt",
+      "wrapper_ref": "Modifiers/attack/advfacegan/wrapper.py",
+      "checkpoint_dir": "Backends/assets/advfacegan",
+      "required_paths": [
+        "Backends/sources/AdvFaceGAN_upstream/README.md",
+        "Modifiers/attack/advfacegan/wrapper.py"
+      ],
+      "runtime_outputs": [
+        "Backends/sources/AdvFaceGAN_upstream/output",
+        "Backends/sources/AdvFaceGAN_upstream/tmp"
+      ]
+    },
+    {
+      "name": "faceshifter",
+      "kind": "backend",
+      "status": "blocked",
+      "repo_dir": "Backends/sources/FaceShifter_upstream",
+      "upstream_label": "FaceShifter preserved upstream snapshot",
+      "notes_ref": "notes/working/20_backend_adaptations.txt",
+      "wrapper_ref": "Modifiers/attack/faceshifter/wrapper.py",
+      "checkpoint_dir": "Backends/assets/faceshifter",
+      "required_paths": [
+        "Backends/sources/FaceShifter_upstream/README.md",
+        "Modifiers/attack/faceshifter/wrapper.py"
+      ]
+    },
+    {
+      "name": "fomm",
+      "kind": "backend",
+      "status": "verified",
+      "repo_dir": "Backends/sources/FOMM_upstream",
+      "upstream_label": "First Order Motion Model preserved upstream snapshot",
+      "notes_ref": "notes/working/20_backend_adaptations.txt",
+      "wrapper_ref": "Modifiers/attack/fomm/wrapper.py",
+      "checkpoint_dir": "Backends/assets/fomm",
+      "required_paths": [
+        "Backends/sources/FOMM_upstream/demo.py",
+        "Modifiers/attack/fomm/wrapper.py"
+      ],
+      "runtime_outputs": [
+        "Backends/sources/FOMM_upstream/output",
+        "Backends/sources/FOMM_upstream/tmp"
+      ]
+    },
+    {
+      "name": "mipgan",
+      "kind": "backend",
+      "status": "scaffolded",
+      "repo_dir": "Backends/sources/MIPGAN_upstream",
+      "upstream_label": "MIPGAN placeholder upstream snapshot",
+      "notes_ref": "notes/working/20_backend_adaptations.txt",
+      "wrapper_ref": "Modifiers/attack/mipgan/wrapper.py",
+      "checkpoint_dir": "Backends/assets/mipgan",
+      "required_paths": [
+        "Backends/sources/MIPGAN_upstream/README.md",
+        "Modifiers/attack/mipgan/wrapper.py"
+      ]
+    },
+    {
+      "name": "mordiff",
+      "kind": "backend",
+      "status": "scaffolded",
+      "repo_dir": "Backends/sources/MorDIFF_upstream",
+      "upstream_label": "MorDIFF preserved upstream snapshot",
+      "notes_ref": "notes/working/20_backend_adaptations.txt",
+      "wrapper_ref": "Modifiers/attack/mordiff/wrapper.py",
+      "checkpoint_dir": "Backends/assets/mordiff",
+      "required_paths": [
+        "Backends/sources/MorDIFF_upstream/README.md",
+        "Modifiers/attack/mordiff/wrapper.py"
+      ]
+    },
+    {
+      "name": "reface",
+      "kind": "backend",
+      "status": "verified",
+      "repo_dir": "Backends/sources/REFace_upstream",
+      "upstream_label": "REFace preserved upstream snapshot",
+      "notes_ref": "notes/working/20_backend_adaptations.txt",
+      "wrapper_ref": "Modifiers/attack/reface/wrapper.py",
+      "checkpoint_dir": "Backends/assets/reface",
+      "required_paths": [
+        "Backends/sources/REFace_upstream/README.md",
+        "Backends/sources/REFace_upstream/scripts/inference_swap_selected.py",
+        "Modifiers/attack/reface/wrapper.py"
+      ],
+      "runtime_outputs": [
+        "Backends/sources/REFace_upstream/assets",
+        "Backends/sources/REFace_upstream/examples",
+        "tmp/reface_smoke_assets",
+        "tmp/reface_smoke_out",
+        "tmp/reface_smoke_records.json"
+      ],
+      "dependencies": [
+        "taming-transformers"
+      ]
+    },
+    {
+      "name": "simswap",
+      "kind": "backend",
+      "status": "verified",
+      "repo_dir": "Backends/sources/SimSwap_upstream",
+      "upstream_label": "SimSwap preserved upstream snapshot",
+      "notes_ref": "notes/working/20_backend_adaptations.txt",
+      "wrapper_ref": "Modifiers/attack/simswap/wrapper.py",
+      "checkpoint_dir": "Backends/assets/simswap",
+      "required_paths": [
+        "Backends/sources/SimSwap_upstream/README.md",
+        "Modifiers/attack/simswap/wrapper.py"
+      ],
+      "runtime_outputs": [
+        "Backends/sources/SimSwap_upstream/output",
+        "Backends/sources/SimSwap_upstream/crop_224",
+        "Backends/sources/SimSwap_upstream/demo_file",
+        "Backends/sources/SimSwap_upstream/docs/img"
+      ],
+      "tolerated_legacy_paths": [
+        "Backends/sources/SimSwap_upstream/checkpoints",
+        "Backends/sources/SimSwap_upstream/arcface_model"
+      ]
+    },
+    {
+      "name": "taming-transformers",
+      "kind": "dependency",
+      "status": "required-for-reface",
+      "repo_dir": "Backends/sources/dependencies/taming-transformers",
+      "legacy_repo_dirs": [
+        "Backends/sources/taming-transformers"
+      ],
+      "upstream_label": "CompVis taming-transformers support dependency",
+      "required_paths": [
+        "Backends/sources/dependencies/taming-transformers/setup.py",
+        "Backends/sources/dependencies/taming-transformers/taming"
+      ],
+      "consumers": [
+        "reface"
+      ]
+    }
+  ]
+}

@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
 
 def build_command(args: argparse.Namespace, source_path: Path, target_path: Path, pair_dir: Path) -> tuple[list[str], Path]:
     if args.entry_script is None:
-        raise ValueError("FaceShifter wrapper could not find an entry script. Put the upstream repo in external/ or pass --entry-script.")
+        raise ValueError("FaceShifter wrapper could not find an entry script. Put the backend source in Backends/sources/ or pass --entry-script.")
 
     result_path = pair_dir / "result.png"
     cmd = [

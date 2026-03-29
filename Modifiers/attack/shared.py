@@ -45,9 +45,10 @@ def bootstrap_project_root(module_file: str | Path, parents: int = 3) -> Path:
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-EXTERNAL_ROOT = PROJECT_ROOT / "external"
-CHECKPOINTS_ROOT = PROJECT_ROOT / "checkpoints"
-TMP_ATTACK_ROOT = PROJECT_ROOT / "tmp" / "attack_workdirs"
+BACKENDS_ROOT = PROJECT_ROOT / "Backends"
+BACKEND_SOURCES_ROOT = BACKENDS_ROOT / "sources"
+BACKEND_ASSETS_ROOT = BACKENDS_ROOT / "assets"
+BACKEND_WORKDIRS_ROOT = BACKENDS_ROOT / "workdirs"
 
 
 @dataclass(frozen=True)
@@ -60,15 +61,15 @@ class ExternalBackendDefaults:
 
     @property
     def repo_dir(self) -> Path:
-        return EXTERNAL_ROOT / self.upstream_dir_name
+        return BACKEND_SOURCES_ROOT / self.upstream_dir_name
 
     @property
     def checkpoint_dir(self) -> Path:
-        return CHECKPOINTS_ROOT / self.method_slug
+        return BACKEND_ASSETS_ROOT / self.method_slug
 
     @property
     def work_dir(self) -> Path:
-        return TMP_ATTACK_ROOT / self.method_slug
+        return BACKEND_WORKDIRS_ROOT / self.method_slug
 
 
 def external_backend_defaults(

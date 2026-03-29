@@ -1,0 +1,21 @@
+# Constructor Layout
+
+Top-level structure
+- `Backends/`: third-party attack-method source snapshots, backend assets, and backend workdirs
+- `Dataset/`: clean and derived datasets plus shared pair files
+- `Models/`: recognition backbones and embedding generators
+- `Recognition/`: clean / corruption / protection verification pipeline
+- `Attack/`: attack pairing, attack metadata, and attack evaluation
+- `Modifiers/`: preprocessing, protection, and attack wrappers
+- `Results/`: embeddings, metrics, compiled results, and parsed tables
+- `Utility/`: shared runtime, path, and result helpers
+- `notes/`: constructor docs, working logs, and references
+
+Key files
+- `Utility/paths.py`: dataset naming / base-root / chain resolution
+- `Utility/runtime.py`: shared paths, subprocess helpers, and model registry
+- `Recognition/evaluate.py`: shared clean / corruption / protection evaluator
+- `Attack/evaluate.py`: impersonation / attack-success evaluator
+- `Attack/pairs.py`: hard / semi-hard attack pair generation
+- `Attack/materialize.py`: attack dataset materialization
+- `Models/<Model>/generate.py`: dataset root to embeddings

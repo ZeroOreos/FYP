@@ -21,17 +21,18 @@ Dataset/**/*.npy
 Results/**
 !Results/compiled_results.csv
 tmp/**
-!tmp/attack_workdirs/
-tmp/attack_workdirs/*
-!tmp/attack_workdirs/.gitkeep
-!tmp/attack_workdirs/*/
-!tmp/attack_workdirs/*/.gitkeep
 
 # Local heavyweight checkpoints and support caches
-checkpoints/**
-!checkpoints/.gitkeep
-!checkpoints/*/
-!checkpoints/*/.gitkeep
+Backends/assets/**
+!Backends/assets/.gitkeep
+!Backends/assets/*/
+!Backends/assets/*/.gitkeep
+
+# Backend workdirs
+Backends/workdirs/**
+!Backends/workdirs/.gitkeep
+!Backends/workdirs/*/
+!Backends/workdirs/*/.gitkeep
 
 # Regenerable local model testing outputs
 Models/*/testing/*.npz
@@ -41,17 +42,17 @@ Models/*/testing/*.csv
 Images/test0.jpeg
 
 # Upstream repo runtime outputs and downloaded archives
-external/*/.git.backup/
-external/*/output/
-external/*/tmp/
-external/*/temp/
-external/*/temp_results/
-external/*/checkpoints/
-external/*/arcface_model/
-external/*/antelope.zip
-external/REFace_upstream/assets/
-external/REFace_upstream/examples/
-external/SimSwap_upstream/crop_224/
-external/SimSwap_upstream/demo_file/
-external/SimSwap_upstream/docs/img/
-external/SimSwap_upstream/simswaplogo/
+Backends/sources/*/.git.backup/
+Backends/sources/*/output/
+Backends/sources/*/tmp/
+Backends/sources/*/temp/
+Backends/sources/*/temp_results/
+Backends/sources/*/checkpoints/
+Backends/sources/*/arcface_model/
+Backends/sources/*/antelope.zip
+Backends/sources/REFace_upstream/assets/
+Backends/sources/REFace_upstream/examples/
+Backends/sources/SimSwap_upstream/crop_224/
+Backends/sources/SimSwap_upstream/demo_file/
+Backends/sources/SimSwap_upstream/docs/img/
+Backends/sources/SimSwap_upstream/simswaplogo/

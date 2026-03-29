@@ -69,7 +69,7 @@ def build_command(
     pair_dir: Path,
 ) -> tuple[list[str], Path]:
     if args.entry_script is None or args.config is None or args.checkpoint is None:
-        raise ValueError("REFace wrapper needs an entry script, config, and checkpoint. Put the upstream repo in external/ and weights in checkpoints/, or pass them explicitly.")
+        raise ValueError("REFace wrapper needs an entry script, config, and checkpoint. Put the backend source in Backends/sources/ and weights in Backends/assets/, or pass them explicitly.")
 
     outdir = pair_dir / "run"
     base_dir = pair_dir / "base"
@@ -113,7 +113,11 @@ def build_env_updates(args: argparse.Namespace) -> dict[str, str]:
     support_dir = args.checkpoint.parent / "support"
     hf_home = support_dir / "hf_home"
     hf_cache = support_dir / "hf_cache"
-    taming_dir = args.repo_dir.parent / "taming-transformers"
+    taming_candidates = (
+        args.repo_dir.parent / "dependencies" / "taming-transformers",
+        args.repo_dir.parent / "taming-transformers",
+    )
+    taming_dir = next((path for path in taming_candidates if path.exists()), None)
     torch_home = support_dir / "torch_home"
     matplotlib_dir.mkdir(parents=True, exist_ok=True)
     support_dir.mkdir(parents=True, exist_ok=True)
@@ -121,7 +125,7 @@ def build_env_updates(args: argparse.Namespace) -> dict[str, str]:
     hf_cache.mkdir(parents=True, exist_ok=True)
     torch_home.mkdir(parents=True, exist_ok=True)
     pythonpath_parts = [str(args.repo_dir)]
-    if taming_dir.exists():
+    if taming_dir is not None:
         pythonpath_parts.append(str(taming_dir))
     return {
         "MPLCONFIGDIR": str(matplotlib_dir),

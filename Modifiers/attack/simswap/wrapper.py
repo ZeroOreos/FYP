@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
 
 def build_command(args: argparse.Namespace, source_path: Path, target_path: Path, pair_dir: Path) -> tuple[list[str], Path]:
     if args.entry_script is None:
-        raise ValueError("SimSwap wrapper could not find an entry script. Put the upstream repo in external/ or pass --entry-script.")
+        raise ValueError("SimSwap wrapper could not find an entry script. Put the backend source in Backends/sources/ or pass --entry-script.")
 
     result_dir = pair_dir / "result"
     temp_dir = pair_dir / "temp"

@@ -1,0 +1,23 @@
+# Backend Hygiene
+
+Backend hygiene standard
+- Treat `Backends/` as the top-level backend domain for this FYP, with clear separation between source snapshots, backend assets, and backend workdirs
+- Attack backends live in `Backends/sources/<Name>_upstream/`
+- Support repos live in `Backends/sources/dependencies/`
+- Backend assets live in `Backends/assets/<method>/`
+- Temporary workdirs live in `Backends/workdirs/<method>/`
+- Do not keep nested `.git` directories inside vendored backend sources
+- Do not keep runtime outputs, smoke-test artifacts, demo media, or regenerated caches inside backend source trees unless intentionally preserved and documented
+- If a backend needs a support repo such as `taming-transformers`, record it in `Backends/manifest.json`
+- Before calling a backend clean, run `python3 scripts/bootstrap_backends.py audit`
+
+Rule for future backend entries
+- For every backend added or changed, append:
+- exact upstream repo used
+- upstream commit hash or snapshot date when known
+- exact weights or extra assets used
+- exact local files patched
+- exact runtime issues encountered
+- exact command used for verification
+- exact output file written during verification
+- blunt fidelity note stating whether it is upstream-faithful, patched, approximated, or blocked
