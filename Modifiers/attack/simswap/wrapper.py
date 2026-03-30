@@ -12,6 +12,7 @@ from Modifiers.attack.shared import build_extra_args, build_output_path, copy_im
 from Modifiers.attack.shared import external_backend_extra_lines, find_first_existing_file, find_latest_file
 from Modifiers.attack.shared import load_pair_rows, make_record, prepare_pair_workdir, print_run_header
 from Modifiers.attack.shared import require_existing_paths, resolve_external_backend_args, run_command, write_summary
+from Utility.runtime import resolve_torch_device
 
 
 DEFAULTS = external_backend_defaults(
@@ -31,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--entry-script", type=Path, default=None)
     parser.add_argument("--python-bin", type=str, default=sys.executable)
     parser.add_argument("--work-dir", type=Path, default=None)
+    parser.add_argument("--device", choices=("auto", "cuda", "mps", "cpu"), default=None)
     parser.add_argument("--crop-size", type=int, default=224)
     parser.add_argument("--name", type=str, default="people")
     parser.add_argument("--use-mask", action="store_true")
@@ -54,15 +56,17 @@ def build_command(args: argparse.Namespace, source_path: Path, target_path: Path
     result_dir.mkdir(parents=True, exist_ok=True)
     temp_dir.mkdir(parents=True, exist_ok=True)
     output_path = f"{result_dir}{os.sep}" if str(result_dir).endswith(os.sep) else f"{result_dir}{os.sep}"
+    resolved_device = resolve_torch_device(args.device)
+    gpu_ids = "0" if resolved_device == "cuda" else "-1"
     cmd = [
-        args.python_bin,
+        str(Path(args.python_bin).absolute()),
         str(args.entry_script),
         "--isTrain",
         "false",
         "--name",
         args.name,
         "--gpu_ids",
-        "-1",
+        gpu_ids,
         "--pic_a_path",
         str(source_path),
         "--pic_b_path",
@@ -102,7 +106,11 @@ def resolve_output_file(result_dir: Path, pair_dir: Path) -> Path | None:
 def build_env_updates(args: argparse.Namespace) -> dict[str, str]:
     matplotlib_dir = args.work_dir / "_matplotlib"
     matplotlib_dir.mkdir(parents=True, exist_ok=True)
-    return {"MPLCONFIGDIR": str(matplotlib_dir)}
+    return {
+        "MPLCONFIGDIR": str(matplotlib_dir),
+        "FYP_TORCH_DEVICE": resolve_torch_device(args.device),
+        "PYTORCH_ENABLE_MPS_FALLBACK": "1",
+    }
 
 
 def main() -> None:

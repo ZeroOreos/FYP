@@ -1,3 +1,4 @@
+import os
 import sys
 import yaml
 from argparse import ArgumentParser
@@ -22,30 +23,52 @@ from tempfile import NamedTemporaryFile
 if sys.version_info[0] < 3:
     raise Exception("You must use Python 3 or higher. Recommended version is Python 3.7")
 
+
+def resolve_device(cpu=False):
+    requested = os.environ.get("FYP_TORCH_DEVICE", "").strip().lower()
+    if cpu:
+        return torch.device("cpu")
+    if requested in ("", "auto"):
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        mps = getattr(torch.backends, "mps", None)
+        if mps is not None and torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+    if requested == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA requested for FOMM but is not available.")
+        return torch.device("cuda")
+    if requested == "mps":
+        mps = getattr(torch.backends, "mps", None)
+        if mps is None or not torch.backends.mps.is_available():
+            raise RuntimeError("MPS requested for FOMM but is not available.")
+        return torch.device("mps")
+    if requested == "cpu":
+        return torch.device("cpu")
+    raise ValueError(f"Unsupported FYP_TORCH_DEVICE for FOMM: {requested}")
+
+
 def load_checkpoints(config_path, checkpoint_path, cpu=False):
+    device = resolve_device(cpu=cpu)
 
     with open(config_path) as f:
         config = yaml.full_load(f)
 
     generator = OcclusionAwareGenerator(**config['model_params']['generator_params'],
                                         **config['model_params']['common_params'])
-    if not cpu:
-        generator.cuda()
+    generator.to(device)
 
     kp_detector = KPDetector(**config['model_params']['kp_detector_params'],
                              **config['model_params']['common_params'])
-    if not cpu:
-        kp_detector.cuda()
+    kp_detector.to(device)
 
-    if cpu:
-        checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
-    else:
-        checkpoint = torch.load(checkpoint_path)
+    checkpoint = torch.load(checkpoint_path, map_location=device)
 
     generator.load_state_dict(checkpoint['generator'])
     kp_detector.load_state_dict(checkpoint['kp_detector'])
 
-    if not cpu:
+    if device.type == "cuda":
         generator = DataParallelWithCallback(generator)
         kp_detector = DataParallelWithCallback(kp_detector)
 
@@ -56,19 +79,18 @@ def load_checkpoints(config_path, checkpoint_path, cpu=False):
 
 
 def make_animation(source_image, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False):
+    device = resolve_device(cpu=cpu)
     with torch.no_grad():
         predictions = []
         source = torch.tensor(source_image[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2)
-        if not cpu:
-            source = source.cuda()
+        source = source.to(device)
         driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3)
+        driving = driving.to(device)
         kp_source = kp_detector(source)
         kp_driving_initial = kp_detector(driving[:, :, 0])
 
         for frame_idx in tqdm(range(driving.shape[2])):
             driving_frame = driving[:, :, frame_idx]
-            if not cpu:
-                driving_frame = driving_frame.cuda()
             kp_driving = kp_detector(driving_frame)
             kp_norm = normalize_kp(kp_source=kp_source, kp_driving=kp_driving,
                                    kp_driving_initial=kp_driving_initial, use_relative_movement=relative,
@@ -89,8 +111,12 @@ def find_best_frame(source, driving, cpu=False):
         kp[:, :2] = kp[:, :2] / area
         return kp
 
-    fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, flip_input=True,
-                                      device='cpu' if cpu else 'cuda')
+    device = resolve_device(cpu=cpu)
+    fa = face_alignment.FaceAlignment(
+        face_alignment.LandmarksType._2D,
+        flip_input=True,
+        device=device.type,
+    )
     kp_source = fa.get_landmarks(255 * source)[0]
     kp_source = normalize_kp(kp_source)
     norm  = float('inf')

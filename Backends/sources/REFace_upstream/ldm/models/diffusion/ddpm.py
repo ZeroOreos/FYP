@@ -16,7 +16,10 @@ from contextlib import contextmanager
 from functools import partial
 from tqdm import tqdm
 from torchvision.utils import make_grid
-from pytorch_lightning.utilities.distributed import rank_zero_only
+try:
+    from pytorch_lightning.utilities.rank_zero import rank_zero_only
+except ImportError:  # pragma: no cover
+    from pytorch_lightning.utilities.distributed import rank_zero_only
 from ldm.util import log_txt_as_img, exists, default, ismap, isimage, mean_flat, count_params, instantiate_from_config
 from ldm.modules.ema import LitEma
 from ldm.modules.distributions.distributions import normal_kl, DiagonalGaussianDistribution
@@ -33,7 +36,15 @@ from torch.autograd import Variable
 from src.Face_models.encoders.model_irse import Backbone
 import dlib
 from eval_tool.lpips.lpips import LPIPS
-import wandb
+try:
+    import wandb
+except ImportError:  # pragma: no cover
+    class _WandbStub:
+        @staticmethod
+        def log(*args, **kwargs):
+            return None
+
+    wandb = _WandbStub()
 from PIL import Image
 import argparse
 

@@ -1,9 +1,21 @@
 # Constructor Purpose
 
 Goal
-- Priority task: face-swap and reenactment attacks against face verification
-- Main question: can manipulated probes be accepted as the victim identity
-- Secondary tasks: recognition robustness, privacy protection, readable benchmarking
+- FYP goal: evaluate deepfake prevention and detection under realistic manipulated-face attacks, with emphasis on locally deployable defense models
+- This defensive evaluation goal was part of the intended FYP plan from the start; the repo has simply reached the attack-benchmark stage first
+- Current implemented phase: build and validate the manipulated-probe generation and verification-evaluation pipeline
+- Current main question: can manipulated probes be accepted as the victim identity by face verification systems
+- Intended later question: how well can prevention and detection methods identify or suppress those manipulations while remaining practical to shrink, port, and run locally
+- Priority attack families for the current phase: face swap and reenactment
+- Secondary current-phase tasks: recognition robustness, privacy protection, readable benchmarking
+
+Project framing
+- Treat the repo as a staged project rather than a finished defense benchmark
+- Phase 1: build attack backends, pair generation, materialization, and verification evaluation
+- Phase 2: add prevention / detection methods and evaluate them against the generated manipulations, including local deployment constraints
+- Protection / prevention model space is part of the intended project structure, even where implementation is still incomplete
+- Initial planned defense-model shortlist is `UniDefense`, `FaceShield`, `M2F2-Det`, and `RECCE`
+- Attack diversity matters because it creates a more realistic test bed for the later defensive phase, not because every backend is equally central to the thesis
 
 Notes contract
 - Constructor docs live under `notes/constructor/`

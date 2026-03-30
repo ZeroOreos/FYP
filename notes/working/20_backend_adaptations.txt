@@ -27,6 +27,7 @@ Runtime policy
 - Keep envs isolated by model rather than forcing a single repo-wide PyTorch stack
 - Record accelerator support per model in these notes after the env is proven locally
 - Add a second model-local env only when a distinct accelerator-oriented stack is genuinely needed
+- Near-term runtime goal: try to build a practical MPS-capable venv path that all active models can use, while falling back to model-local envs where compatibility still diverges
 
 Model: simswap
 - Status: verified
@@ -36,7 +37,7 @@ Model: simswap
 - Accelerator status:
 - CUDA: upstream-oriented
 - CPU: locally patched and verified
-- CoreML / Apple path: not yet vetted
+- MPS / Apple Metal: one-pair wrapper smoke test now verified under `Backends/workdirs/simswap/venv_mps`
 - Assets used:
 - `Backends/sources/SimSwap_upstream` upstream inference code
 - SimSwap `people` checkpoint assets under `Backends/sources/SimSwap_upstream/checkpoints/people/`
@@ -55,14 +56,18 @@ Model: simswap
 - `Backends/sources/SimSwap_upstream/models/fs_model.py`
 - Local adaptations:
 - added the external-backend wrapper at `Modifiers/attack/simswap/wrapper.py`
-- patched `Backends/sources/SimSwap_upstream/test_one_image.py` so the single-image inference path can run on CPU instead of assuming CUDA-only execution
+- patched `Backends/sources/SimSwap_upstream/test_one_image.py` so the single-image inference path can follow `cuda -> mps -> cpu` instead of assuming CUDA-only execution
+- patched `Backends/sources/SimSwap_upstream/models/base_model.py` so model restore/save paths use the resolved runtime device rather than assuming CUDA
 - patched `Backends/sources/SimSwap_upstream/models/fs_model.py` so ArcFace checkpoint loading works on newer PyTorch with `weights_only=False` and CPU-aware device handling
 - fixed wrapper output-path handling so generated files land in the intended FYP output location
+- wrapper now forwards `FYP_TORCH_DEVICE`, enables MPS fallback, and keeps `--python-bin` inside the selected venv when launching the upstream repo
 - wrapper redirects `MPLCONFIGDIR` into the attack work area to avoid local cache/temp issues
+- built `Backends/workdirs/simswap/venv_mps` with Python 3.11 and verified a one-pair MPS smoke test through `Backends/workdirs/simswap/mps_smoke_out/` and `Backends/workdirs/simswap/mps_smoke_records.json`
 - Fidelity note:
 - best-effort wrapper around the official upstream repo with CPU-compatibility patches
 - Remaining caveats:
 - not a byte-faithful original CUDA environment
+- current verified path uses `test_one_image.py`, so it does not depend on the separate face-parsing checkpoint used by the whole-image masked scripts
 
 Model: fomm
 - Status: verified
@@ -72,7 +77,7 @@ Model: fomm
 - Accelerator status:
 - CUDA: upstream-oriented
 - CPU: wrapper-verified
-- CoreML / Apple path: not yet vetted
+- MPS / Apple Metal: one-pair wrapper smoke test now verified under `Backends/workdirs/fomm/venv_mps`
 - Assets used:
 - `Backends/sources/FOMM_upstream/demo.py`
 - clean checkpoint `Backends/assets/fomm/vox-cpk.pth.tar`
@@ -87,14 +92,21 @@ Model: fomm
 - `python3 Modifiers/attack/fomm/generate.py ...`
 - Local files patched:
 - `Modifiers/attack/fomm/wrapper.py`
+- `Backends/sources/FOMM_upstream/demo.py`
+- `Backends/sources/FOMM_upstream/modules/util.py`
+- `Backends/sources/FOMM_upstream/modules/dense_motion.py`
+- `Backends/sources/FOMM_upstream/modules/model.py`
 - Local adaptations:
 - added the external-backend wrapper at `Modifiers/attack/fomm/wrapper.py`
-- wrapper auto-forces CPU when CUDA or MPS are unavailable
+- wrapper now follows `cuda -> mps -> cpu`, forwards `FYP_TORCH_DEVICE`, and resolves `--python-bin` to an absolute path before launching the upstream repo
 - default paths were normalized to the upstream config and local checkpoint layout
 - `MPLCONFIGDIR` is redirected into the attack work area to avoid temp/cache issues
 - wrapper creates a still driving video from the victim image and then extracts the first output frame back into the FYP image-based attack layout
 - corrupted early checkpoint downloads were discarded and replaced with a clean checkpoint source
 - canonical checkpoint path was cleaned up so `Backends/assets/fomm/vox-cpk.pth.tar` is now the verified working file
+- patched the upstream demo path for general device routing so checkpoint restore, model placement, animation tensors, and best-frame alignment can run on MPS
+- patched FOMM tensor-creation helpers to stop assuming legacy CUDA tensor type strings, which was the main blocker during the 2026-03-30 MPS smoke test
+- MPS smoke-test artifacts now exist under `Backends/workdirs/fomm/mps_smoke_out/` and `Backends/workdirs/fomm/mps_smoke_records.json`
 - Fidelity note:
 - best-effort wrapper around the official upstream repo; operationally verified
 - Remaining caveats:
@@ -133,7 +145,7 @@ Model: reface
 - Accelerator status:
 - CUDA: upstream-oriented
 - CPU: locally patched and verified
-- CoreML / Apple path: not yet vetted
+- MPS / Apple Metal: one-pair wrapper smoke test now verified under `Backends/workdirs/reface/venv_mps`
 - Assets used:
 - official REFace repo
 - `Backends/assets/reface/last.ckpt`
@@ -151,6 +163,10 @@ Model: reface
 - `tmp/reface_verify_out/elon_demo/will_smith.jpeg`
 - upstream sample output:
 - `Backends/workdirs/reface/00000/run/results/0/000000000000.png`
+- MPS smoke-test output:
+- `Backends/workdirs/reface/mps_smoke_out/victim0/052628.jpg`
+- MPS smoke-test records:
+- `Backends/workdirs/reface/mps_smoke_records.json`
 - Working command:
 - `python3 Modifiers/attack/reface/generate.py Backends/sources/REFace_upstream/examples/FaceSwap tmp/reface_verify_assets/pairs.npz tmp/reface_verify_out tmp/reface_verify_records.json --overwrite --ddim-steps 1 --precision full`
 - Local files patched:
@@ -163,21 +179,29 @@ Model: reface
 - `Backends/sources/REFace_upstream/ldm/data/video_swap_dataset.py`
 - `Backends/sources/REFace_upstream/pretrained/face_parsing/face_parsing_demo.py`
 - `Backends/sources/REFace_upstream/pretrained/face_parsing/model.py`
+- `Backends/sources/REFace_upstream/main.py`
 - Local adaptations:
 - added a new FYP wrapper at `Modifiers/attack/reface/`
 - registered `reface` in `Utility/runtime.py`
+- wrapper now resolves `--python-bin` to an absolute path before launching the upstream repo
 - wrapper now sets local cache env vars for Matplotlib, Hugging Face, and Torch so upstream downloads resolve in stable repo-owned locations instead of `tmp/`
 - wrapper exports `REFACE_CLIP_MODEL_DIR` and offline HF flags so CLIP loads from a local cache instead of calling Hugging Face at runtime
+- wrapper now also exports `FYP_TORCH_DEVICE` and enables MPS fallback for the upstream script
 - fixed wrapper output resolution so it no longer falls back to copied source images when upstream produces no result
 - patched `ldm/modules/encoders/modules.py` so CLIP tokenizer/model loading can resolve from the local CLIP model directory
-- patched `scripts/inference_swap_selected.py` for CPU-safe execution:
+- removed the stale `clip` package import from `ldm/modules/encoders/modules.py` because this repo now uses the local Hugging Face CLIP path instead
+- patched `scripts/inference_swap_selected.py` for CPU/MPS-safe execution:
 - model load avoids unconditional `.cuda()`
-- reference image tensor uses `float32` on CPU
+- reference image tensor uses `float32` on non-CUDA devices
 - autocast only activates on CUDA
-- DataLoader uses `num_workers=0` and `pin_memory=False` on CPU
+- DataLoader uses `num_workers=0` and `pin_memory=False` on non-CUDA devices
+- device resolution now follows `cuda -> mps -> cpu`
 - patched `ldm/models/diffusion/ddim.py` and `ldm/models/diffusion/plms.py` to register buffers on the actual model device instead of assuming CUDA
 - patched `ldm/models/diffusion/ddpm.py` so ArcFace-related checkpoint loads use `map_location=torch.device('cpu')` when CUDA is unavailable
+- patched Lightning import compatibility in `main.py` and `ldm/models/diffusion/ddpm.py` so the current venv can use `pytorch-lightning>=2`
+- made `wandb` optional in `ldm/models/diffusion/ddpm.py` so inference does not depend on training-time logging packages
 - removed dead `clip` and `bezier` imports from `ldm/data/video_swap_dataset.py`
+- removed the stray `turtle` import from `ldm/data/video_swap_dataset.py` because it pulled in unavailable `tkinter` support and broke the preserved verification path
 - patched face parsing code in `pretrained/face_parsing/face_parsing_demo.py` and `pretrained/face_parsing/model.py`:
 - CPU-aware checkpoint deserialization
 - CPU-safe mean/std and bicubic downsampling path
@@ -189,7 +213,7 @@ Model: reface
 - HardNet checkpoint
 - installed `dlib-bin` instead of source-building `dlib`, because source build failed on this machine’s CMake path
 - Fidelity note:
-- best-effort wrapper around the official REFace repo; verified working on CPU with offline cache seeding and targeted compatibility patches
+- best-effort wrapper around the official REFace repo; verified working on CPU and on a one-pair MPS smoke test with offline cache seeding and targeted compatibility patches
 - Remaining caveats:
 - not a byte-faithful original CUDA environment
 - verification used `--ddim-steps 1` for a practical smoke test, not a full-quality benchmark setting
@@ -202,7 +226,7 @@ Model: advfacegan
 - Accelerator status:
 - CUDA: upstream-oriented
 - CPU: wrapper-verified
-- CoreML / Apple path: not yet vetted
+- MPS / Apple Metal: one-pair wrapper smoke test now verified under `Backends/workdirs/advfacegan/venv_mps`
 - Assets used:
 - preserved upstream generator checkpoint `Backends/sources/AdvFaceGAN_upstream/defense/00940_generator.pth`
 - upstream sample images `Backends/sources/AdvFaceGAN_upstream/defense/clean.png` and `Backends/sources/AdvFaceGAN_upstream/defense/fake.png`
@@ -213,6 +237,10 @@ Model: advfacegan
 - `tmp/advfacegan_verify_out/fake_demo/clean.png`
 - records:
 - `tmp/advfacegan_verify_records_checkpoint.json`
+- MPS smoke-test output:
+- `Backends/workdirs/advfacegan/mps_smoke_out/fake_demo/clean.png`
+- MPS smoke-test records:
+- `Backends/workdirs/advfacegan/mps_smoke_records.json`
 - Working command:
 - `python3 Modifiers/attack/advfacegan/generate.py Backends/sources/AdvFaceGAN_upstream/defense tmp/advfacegan_verify_assets/pairs.npz tmp/advfacegan_verify_out tmp/advfacegan_verify_records_checkpoint.json --generator-checkpoint Backends/sources/AdvFaceGAN_upstream/defense/00940_generator.pth --overwrite`
 - Local files patched:
@@ -222,9 +250,12 @@ Model: advfacegan
 - checkpoint-backed inference now dynamically loads the preserved upstream `Generator` class instead of forcing weights into the local recreation architecture
 - wrapper detects whether the checkpoint expects 3-channel source-only or 6-channel source-plus-target input from `conv1.conv.weight`
 - CPU smoke test was verified against the preserved upstream checkpoint and sample images
+- MPS smoke test was also verified against that same preserved upstream checkpoint through `Backends/workdirs/advfacegan/venv_mps`
 - `Backends/assets/advfacegan/ckpts.zip` is not currently a usable verified source for this wrapper path
+- `Backends/assets/advfacegan/ckpts.zip` currently appears corrupt or incomplete during local extraction attempts, so it should not be treated as a ready MPS verification source
+- the current working checkpoint path is the preserved upstream file `Backends/sources/AdvFaceGAN_upstream/defense/00940_generator.pth`, so the broken asset zip is not needed for verification
 - Fidelity note:
-- best-effort wrapper around the preserved upstream repository with checkpoint-adapter behavior for local verification
+- best-effort wrapper around the preserved upstream repository with checkpoint-adapter behavior for local verification; CPU and one-pair MPS smoke tests now succeed with the preserved upstream checkpoint
 - Remaining caveats:
 - not a byte-faithful original training or CUDA environment
 - verified checkpoint path currently uses the source-only upstream defense generator, so target-conditioning behavior still depends on which checkpoint is supplied
@@ -348,13 +379,14 @@ Model: dim
 - `Backends/manifest.json`
 - `Backends/README.md`
 - Local adaptations:
-- added a first-class local DiM approximation backend slot for pipeline integration
+- added a first-class local DiM engineered recreation backend slot for pipeline integration
 - wrapper uses a face-centered soft mask, color-statistics alignment, and symmetric blending to create a deterministic morph-like probe
 - native Greedy-DiM / DiM source was imported, but its runnable morphing script remains encrypted and requires the upstream passphrase-release process
 - local smoke test was re-confirmed after native-source import using `tmp/dim_verify_out/019_03_demo/001_03.png` and `tmp/dim_verify_records.json`
-- no claim is made that the current smoke-tested wrapper is a faithful reproduction of the native DiM release
+- current repo status should be described as an engineered recreation that runs locally, not as a faithful reproduction of the native DiM release
+- further DiM development is not planned under the current roadmap
 - Fidelity note:
-- approximation / best attempt for smoke testing and pipeline continuity
+- engineered recreation / best attempt for smoke testing and pipeline continuity
 - Remaining caveats:
 - exact native repo snapshot is now imported, but runnable code access is still gated by the upstream release process
 - the CITeR software release agreement text does not appear to require a US-affiliated institution in general; it says software may be available to researchers outside CITeR after a signed release agreement, and requires the requestor supervisor signature
@@ -362,19 +394,22 @@ Model: dim
 - the imported native implementation also expects DiffAE and ArcFace assets before it can be executed faithfully
 - this path is suitable for local smoke tests, not yet for paper claims about faithful DiM reproduction
 
-Diffusion morph fallback shortlist if DiM remains gated
-- keep `dim` in the repo and in the paper as the preferred modern diffusion morph target, but describe it as gated rather than dropped
-- evaluate `LADIMO` next as the strongest known latent-diffusion fallback candidate with official code presence, while noting that its official code and pretrained models also appear to be distributed by request
-- keep `StableMorph` as a newer candidate to inspect for runnable public release status before committing implementation effort
+Morph roadmap after DiM
+- keep `dim` in the repo as a documented engineered recreation that runs, but do not plan further development work on it for now
+- today's next morphing build target is `mipgan`
+- if a future diffusion-morph replacement is needed beyond that, inspect `LADIMO` and then `StableMorph`, with the same provenance and openness checks as before
 
 Model: mipgan
 - Status: partial
 - Upstream repo: intended preserved backend is `Backends/sources/MIPGAN_upstream`
-- Upstream snapshot: placeholder repo directory only as of 2026-03-27
+- Upstream snapshot: official public portal snapshot imported 2026-03-30 from `HaoyuZhang/face-morphing-attack-ntnu-MIPGAN-public` at commit `ba42a941b7ce21e5a4c52eb54fcf04cecc3f4378`
 - Local wrapper: `Modifiers/attack/mipgan/wrapper.py`
 - Accelerator status:
 - not yet vetted
 - Assets used:
+- official public portal files:
+- `Backends/sources/MIPGAN_upstream/README.md`
+- `Backends/sources/MIPGAN_upstream/MIPGAN-license-240916.pdf`
 - local fallback wrapper path only
 - verification sample images:
 - `Backends/sources/MorDIFF_upstream/test/aligned/001_03.png`
@@ -394,7 +429,9 @@ Model: mipgan
 - Local adaptations:
 - wrapper scaffold aligned to the shared external-backend pattern
 - when no local upstream entry script is present, the wrapper now emits a deterministic 50/50 blend image as a smoke-test fallback and records that explicitly
+- imported the official public MIPGAN portal snapshot into `Backends/sources/MIPGAN_upstream` without preserving nested Git metadata
+- current immediate goal is to replace as much of the fallback path as possible with a more real buildable MIPGAN path today
 - Fidelity note:
-- best-attempt external wrapper; smoke test can succeed locally, but no upstream MIPGAN implementation is currently present in the repo
+- best-attempt external wrapper; the official public portal snapshot is now present in the repo, but the runnable native MIPGAN package is still not present locally
 - Remaining caveats:
-- backend source provenance, runnable entry script, and checkpoint provenance still need to be established
+- official provenance is now established for the public portal snapshot, but the runnable entry script and pretrained models remain in the separate password-protected distribution package referenced by the portal README

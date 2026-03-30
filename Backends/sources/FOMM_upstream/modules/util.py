@@ -6,6 +6,20 @@ import torch
 from sync_batchnorm import SynchronizedBatchNorm2d as BatchNorm2d
 
 
+def resolve_tensor_options(type_or_tensor):
+    if isinstance(type_or_tensor, torch.Tensor):
+        return {"dtype": type_or_tensor.dtype, "device": type_or_tensor.device}
+    if isinstance(type_or_tensor, str):
+        device = torch.device("cpu")
+        if ".cuda." in type_or_tensor or type_or_tensor.startswith("torch.cuda"):
+            device = torch.device("cuda")
+        elif ".mps." in type_or_tensor or type_or_tensor.startswith("torch.mps"):
+            device = torch.device("mps")
+        dtype = torch.float32 if "FloatTensor" in type_or_tensor else torch.float64
+        return {"dtype": dtype, "device": device}
+    raise TypeError(f"Unsupported tensor type reference: {type(type_or_tensor)!r}")
+
+
 def kp2gaussian(kp, spatial_size, kp_variance):
     """
     Transform a keypoint into gaussian like representation
@@ -35,8 +49,9 @@ def make_coordinate_grid(spatial_size, type):
     Create a meshgrid [-1,1] x [-1,1] of given spatial_size.
     """
     h, w = spatial_size
-    x = torch.arange(w).type(type)
-    y = torch.arange(h).type(type)
+    tensor_options = resolve_tensor_options(type)
+    x = torch.arange(w, **tensor_options)
+    y = torch.arange(h, **tensor_options)
 
     x = (2 * (x / (w - 1)) - 1)
     y = (2 * (y / (h - 1)) - 1)

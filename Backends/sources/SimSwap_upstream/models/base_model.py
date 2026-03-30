@@ -10,13 +10,34 @@ class BaseModel(torch.nn.Module):
         self.opt = opt
         self.gpu_ids = opt.gpu_ids
         self.isTrain = opt.isTrain
-        self.Tensor = torch.cuda.FloatTensor if self.gpu_ids else torch.Tensor
+        self.device = self._resolve_device()
+        self.Tensor = torch.cuda.FloatTensor if self.device.type == 'cuda' else torch.Tensor
         self.save_dir = os.path.join(opt.checkpoints_dir, opt.name)
 
+    def _resolve_device(self):
+        requested = os.environ.get("FYP_TORCH_DEVICE", "").strip().lower()
+        if requested in ("", "auto"):
+            if self.gpu_ids and torch.cuda.is_available():
+                return torch.device('cuda:%d' % self.gpu_ids[0])
+            mps = getattr(torch.backends, "mps", None)
+            if mps is not None and torch.backends.mps.is_available():
+                return torch.device("mps")
+            return torch.device('cpu')
+        if requested == "cuda":
+            if not torch.cuda.is_available():
+                raise RuntimeError("SimSwap requested CUDA but CUDA is not available.")
+            return torch.device('cuda:%d' % (self.gpu_ids[0] if self.gpu_ids else 0))
+        if requested == "mps":
+            mps = getattr(torch.backends, "mps", None)
+            if mps is None or not torch.backends.mps.is_available():
+                raise RuntimeError("SimSwap requested MPS but MPS is not available.")
+            return torch.device("mps")
+        if requested == "cpu":
+            return torch.device("cpu")
+        raise ValueError(f"Unsupported FYP_TORCH_DEVICE for SimSwap: {requested}")
+
     def _map_location(self):
-        if self.gpu_ids and torch.cuda.is_available():
-            return torch.device('cuda:%d' % self.gpu_ids[0])
-        return torch.device('cpu')
+        return self.device
 
     def set_input(self, input):
         self.input = input
@@ -48,8 +69,7 @@ class BaseModel(torch.nn.Module):
         save_filename = '{}_net_{}.pth'.format(epoch_label, network_label)
         save_path = os.path.join(self.save_dir, save_filename)
         torch.save(network.cpu().state_dict(), save_path)
-        if torch.cuda.is_available():
-            network.cuda()
+        network.to(self.device)
 
     def save_optim(self, network, network_label, epoch_label, gpu_ids=None):
         save_filename = '{}_optim_{}.pth'.format(epoch_label, network_label)

@@ -77,12 +77,13 @@
       "kind": "backend",
       "status": "partial",
       "repo_dir": "Backends/sources/MIPGAN_upstream",
-      "upstream_label": "MIPGAN placeholder upstream snapshot",
+      "upstream_label": "MIPGAN official public portal snapshot (native package still separately licensed/password-protected)",
       "notes_ref": "notes/working/20_backend_adaptations.txt",
       "wrapper_ref": "Modifiers/attack/mipgan/wrapper.py",
       "checkpoint_dir": "Backends/assets/mipgan",
       "required_paths": [
         "Backends/sources/MIPGAN_upstream/README.md",
+        "Backends/sources/MIPGAN_upstream/MIPGAN-license-240916.pdf",
         "Modifiers/attack/mipgan/wrapper.py"
       ]
     },

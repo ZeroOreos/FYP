@@ -8,18 +8,18 @@ from .base_model import BaseModel
 from . import networks
 
 class SpecificNorm(nn.Module):
-    def __init__(self, epsilon=1e-8):
+    def __init__(self, device, epsilon=1e-8):
         """
             @notice: avoid in-place ops.
             https://discuss.pytorch.org/t/encounter-the-runtimeerror-one-of-the-variables-needed-for-gradient-computation-has-been-modified-by-an-inplace-operation/836/3
         """
         super(SpecificNorm, self).__init__()
         self.mean = np.array([0.485, 0.456, 0.406])
-        self.mean = torch.from_numpy(self.mean).float().cuda()
+        self.mean = torch.from_numpy(self.mean).float().to(device)
         self.mean = self.mean.view([1, 3, 1, 1])
 
         self.std = np.array([0.229, 0.224, 0.225])
-        self.std = torch.from_numpy(self.std).float().cuda()
+        self.std = torch.from_numpy(self.std).float().to(device)
         self.std = self.std.view([1, 3, 1, 1])
 
     def forward(self, x):
@@ -49,7 +49,7 @@ class fsModel(BaseModel):
                 torch.backends.cudnn.benchmark = True
         self.isTrain = opt.isTrain
 
-        device = torch.device('cuda:%d' % self.gpu_ids[0]) if self.gpu_ids and torch.cuda.is_available() else torch.device('cpu')
+        device = self.device
 
         if opt.crop_size == 224:
             from .fs_networks import Generator_Adain_Upsample, Discriminator
@@ -83,7 +83,7 @@ class fsModel(BaseModel):
         self.netD2.to(device)
 
         #
-        self.spNorm =SpecificNorm()
+        self.spNorm = SpecificNorm(device)
         self.downsample = nn.AvgPool2d(3, stride=2, padding=[1, 1], count_include_pad=False)
 
         # load networks
@@ -121,7 +121,7 @@ class fsModel(BaseModel):
     def _gradinet_penalty_D(self, netD, img_att, img_fake):
         # interpolate sample
         bs = img_fake.shape[0]
-        alpha = torch.rand(bs, 1, 1, 1).expand_as(img_fake).cuda()
+        alpha = torch.rand(bs, 1, 1, 1, device=self.device).expand_as(img_fake)
         interpolated = Variable(alpha * img_att + (1 - alpha) * img_fake, requires_grad=True)
         pred_interpolated = netD.forward(interpolated)
         pred_interpolated = pred_interpolated[-1]
@@ -129,7 +129,7 @@ class fsModel(BaseModel):
         # compute gradients
         grad = torch.autograd.grad(outputs=pred_interpolated,
                                    inputs=interpolated,
-                                   grad_outputs=torch.ones(pred_interpolated.size()).cuda(),
+                                   grad_outputs=torch.ones(pred_interpolated.size(), device=self.device),
                                    retain_graph=True,
                                    create_graph=True,
                                    only_inputs=True)[0]

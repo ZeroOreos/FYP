@@ -59,6 +59,29 @@ safety_checker = None
 #set cuda device 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
+
+def resolve_device():
+    requested = os.environ.get("FYP_TORCH_DEVICE", "").strip().lower()
+    if requested in ("", "auto"):
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        mps = getattr(torch.backends, "mps", None)
+        if mps is not None and torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+    if requested == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA requested for REFace but is not available.")
+        return torch.device("cuda")
+    if requested == "mps":
+        mps = getattr(torch.backends, "mps", None)
+        if mps is None or not torch.backends.mps.is_available():
+            raise RuntimeError("MPS requested for REFace but is not available.")
+        return torch.device("mps")
+    if requested == "cpu":
+        return torch.device("cpu")
+    raise ValueError(f"Unsupported FYP_TORCH_DEVICE for REFace: {requested}")
+
 def get_tensor(normalize=True, toTensor=True):
     transform_list = []
     if toTensor:
@@ -146,7 +169,7 @@ def load_model_from_config(config, ckpt, verbose=False):
         print("unexpected keys:")
         print(u)
 
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    device = resolve_device()
     model.to(device)
     model.eval()
     return model
@@ -388,7 +411,7 @@ def main():
     config = OmegaConf.load(f"{opt.config}")
     model = load_model_from_config(config, f"{opt.ckpt}")
 
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    device = resolve_device()
     
     model = model.to(device)
 

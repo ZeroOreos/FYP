@@ -19,8 +19,25 @@ Attack pipeline
 - parsed tables
 - Every stage should skip when its target already exists and is still valid
 
+Defensive evaluation pipeline target
+- Input: manipulated probes plus prevention / detection method configuration
+- Planned flow:
+- manipulated probe set from the attack pipeline
+- defensive transform or predictor execution
+- defended-probe or local-deployment-ready model output materialization
+- post-defense verification metrics and deployment-oriented metrics such as runtime, memory, and portability
+- compiled results
+- parsed tables
+- Current repo status: this phase was always part of the intended project plan, but it is not yet the main implemented path
+- The current attack pipeline should be treated as the required benchmark-construction stage for this defensive phase rather than as a separate late-added direction
+
 Pairing
 - `Attack/pairs.py` input: embeddings file or model result directory
 - Output: `<variant>_<model>_atkpairs.npz` and `.json`
 - Pairing basis: identity centroid cosine similarity, then image cosine similarity
 - Support at least `hard` and `semi_hard`
+
+Evaluation interpretation
+- Attack-verification metrics are the current operational benchmark because they are needed before later defense evaluation can be meaningful
+- Once prevention / detection methods are added, the same manipulated-probe sets should be reused so attack-side and defense-side results stay comparable
+- Local deployment evaluation should track whether defense models remain effective after shrinking, porting, or adapting them to practical runtimes such as MPS-friendly stacks

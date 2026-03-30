@@ -1,15 +1,18 @@
 # Backends Workflow
 
-This folder stores backend-related source snapshots, dependencies, assets, and workdirs used by the FYP wrappers under `Modifiers/attack/`.
+This folder stores backend-related source snapshots, dependencies, assets, and workdirs used by the FYP attack and protection wrappers.
 
 The goal is to keep these externals reproducible without turning the main repo into a Git-management headache.
 
 ## Layout
 
-- `Backends/sources/<Name>_upstream/`: preserved third-party attack backends
+- `Backends/sources/attack/<Name>_upstream/`: preserved third-party attack backends
+- `Backends/sources/protection/<Name>_upstream/`: preserved third-party protection / detection backends
 - `Backends/sources/dependencies/`: support repositories that are dependencies of a backend but are not attack methods themselves
-- `Backends/assets/<method>/`: local model weights and support assets
-- `Backends/workdirs/<method>/`: temporary wrapper workdirs
+- `Backends/assets/attack/<method>/`: local attack-model weights and support assets
+- `Backends/assets/protection/<method>/`: local protection-model weights and support assets
+- `Backends/workdirs/attack/<method>/`: temporary attack-wrapper workdirs
+- `Backends/workdirs/protection/<method>/`: temporary protection-wrapper workdirs
 
 Current support dependency:
 
@@ -17,16 +20,18 @@ Current support dependency:
 
 Legacy compatibility:
 
-- `Modifiers/attack/reface/wrapper.py` still accepts the older sibling path `Backends/sources/taming-transformers/` if present
+- legacy attack wrappers may still accept older sibling paths such as `Backends/sources/taming-transformers/` if present
 - new work should prefer `Backends/sources/dependencies/taming-transformers/`
 
 ## Rules
 
-- Keep wrapper code out of `Backends/`; wrappers belong in `Modifiers/attack/`
+- Keep wrapper code out of `Backends/`; wrappers belong in `Models/attack/` and `Models/protection/`
 - Keep runtime outputs, caches, and downloaded weights out of upstream trees
 - Do not leave nested `.git` directories inside vendored externals
 - Record every backend and dependency in `Backends/manifest.json`
 - Record local behavior changes and fidelity notes in `notes/working/20_backend_adaptations.txt`
+- Protection backends should default to one dedicated env per model under `Backends/workdirs/protection/<method>/`
+- Protection wrappers should prefer device order `cuda -> mps -> cpu` unless per-model notes document a verified reason to override it
 
 ## Bootstrap Philosophy
 
@@ -68,15 +73,15 @@ Preferred model:
 
 Noise that should be cleaned instead of preserved:
 
-- temporary attack workdirs under `Backends/workdirs/<method>/` except `.gitkeep`
+- temporary workdirs under `Backends/workdirs/attack/<method>/` and `Backends/workdirs/protection/<method>/` except `.gitkeep`
 - smoke-test artifacts under `tmp/`
-- upstream demo outputs copied into ignored paths such as `Backends/sources/SimSwap_upstream/output/`
+- upstream demo outputs copied into ignored paths such as `Backends/sources/attack/SimSwap_upstream/output/`
 - bulky example media in ignored runtime-only paths such as:
-  `Backends/sources/SimSwap_upstream/crop_224/`
-  `Backends/sources/SimSwap_upstream/demo_file/`
-  `Backends/sources/SimSwap_upstream/docs/img/`
-  `Backends/sources/REFace_upstream/assets/`
-  `Backends/sources/REFace_upstream/examples/`
+  `Backends/sources/attack/SimSwap_upstream/crop_224/`
+  `Backends/sources/attack/SimSwap_upstream/demo_file/`
+  `Backends/sources/attack/SimSwap_upstream/docs/img/`
+  `Backends/sources/attack/REFace_upstream/assets/`
+  `Backends/sources/attack/REFace_upstream/examples/`
 - nested Git metadata inside vendored directories
 
 Why not heavy bootstrap automation?

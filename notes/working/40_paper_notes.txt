@@ -1,8 +1,9 @@
 # Paper Notes
 
 Current working shortlist
-- Family-complete target set is `simswap`, `reface`, `advfacegan`, `fomm`, `dim`, `mordiff`, with `mipgan` optional as the older GAN morph baseline
+- Family-complete target set is `simswap`, `reface`, `advfacegan`, `fomm`, `dim`, `mordiff`, with `mipgan` as today's next build target for the older GAN morph baseline
 - Keep `fomm` analytically separate as reenactment rather than mixing it directly into swap or morph conclusions
+- Prevention / detection evaluation with locally deployable defense models was always part of the intended FYP plan; the current repo state reflects attack-benchmark construction being implemented first
 
 Current verified working set as of 2026-03-29
 - Verified working set is `simswap`, `fomm`, `reface`, `advfacegan`, and `mordiff`
@@ -13,15 +14,55 @@ Current verified working set as of 2026-03-29
 - MorDIFF now has the official DiffAE checkpoint locally and a successful checkpoint-backed native CPU smoke test using reduced-step midpoint-only settings
 - MorDIFF also now has a successful native MPS smoke test through `Backends/workdirs/mordiff/venv_mps`, again using reduced-step midpoint-only settings
 - MorDIFF wrapper-level MPS generation is now also confirmed through `tmp/mordiff_wrapper_mps_out/019_03_demo/001_03.png`
-- DiM faithful execution is still gated by the upstream encrypted code-release process
-- DiM local approximation smoke test remains healthy after the native-source import, so the pipeline slot is stable even though native faithfulness is still gated
-- keep `dim` in scope rather than scrapping it; frame the current problem as release gating, not method rejection
-- if `dim` remains unavailable in practice, the next diffusion-morph candidates to examine are `LADIMO` and then `StableMorph`, with the caveat that both still need provenance and openness checks before adoption
+- FOMM now also has a successful one-pair MPS wrapper smoke test through `Backends/workdirs/fomm/venv_mps`
+- SimSwap now also has a successful one-pair MPS wrapper smoke test through `Backends/workdirs/simswap/venv_mps`
+- REFace now also has a successful one-pair MPS wrapper smoke test through `Backends/workdirs/reface/venv_mps`
+- AdvFaceGAN now also has a successful one-pair MPS wrapper smoke test through `Backends/workdirs/advfacegan/venv_mps`
+- DiM should currently be described as an engineered recreation that runs locally rather than as a faithful native reproduction
+- further DiM development is not planned unless something materially changes in the upstream release situation
+- today's morphing development target is to build `mipgan`
+- MPS-oriented Python 3.11 venvs now exist for `simswap`, `fomm`, `reface`, and `advfacegan`
+- current active-set MPS status:
+- `mordiff`: verified end to end
+- `fomm`: verified on a one-pair wrapper smoke test
+- `simswap`: verified on a one-pair wrapper smoke test
+- `reface`: verified on a one-pair wrapper smoke test
+- `advfacegan`: verified on a one-pair wrapper smoke test
+- todo: add prevention / detection models so the repo can move from attack-benchmark construction into the intended defensive evaluation phase
+- current defense-model shortlist is `UniDefense`, `FaceShield`, `M2F2-Det`, and `RECCE`
+- preferred initial order is `UniDefense` -> `FaceShield` -> `M2F2-Det`, with `RECCE` kept as the simpler fallback if the newer stacks become too heavy or awkward
+- todo: research shrinking, porting, and local deployment paths for the defense models so they can run in practical local environments
+- planned structural cleanup: move attack wrappers next to protection wrappers under `Models/`, and split backend storage into explicit `attack/` and `protection/` subtrees so both families follow the same layout
 
 Runtime planning
 - Standardize on one canonical venv per model rather than one repo-wide Python stack
-- Track accelerator capability per model after local verification instead of assuming shared MPS compatibility
-- Add a second accelerator-oriented env for a model only when the base model env is not enough
+- Track accelerator capability per model after local verification while also trying to build a practical MPS-capable venv path that all active models can use
+- Add a second accelerator-oriented env for a model only when the shared MPS-oriented path is not enough
+- Keep defense-model integration structurally consistent with the attack backends where practical:
+- preserve third-party source snapshots under `Backends/sources/attack/<Name>_upstream/` and `Backends/sources/protection/<Name>_upstream/`
+- keep mutable weights and support assets under `Backends/assets/attack/<method>/` and `Backends/assets/protection/<method>/`
+- keep per-model runtimes under `Backends/workdirs/attack/<method>/` and `Backends/workdirs/protection/<method>/`
+- keep thin FYP-facing wrappers under `Models/attack/<method>/` and `Models/protection/<method>/`
+- give each protection model its own venv rather than forcing one shared protection stack
+- protection-model device preference should default to `cuda -> mps -> cpu`
+- record exact adaptations and verification commands in working notes with the same blunt fidelity labeling used for attack backends
+
+Licensing and source summary
+- `simswap`: official `neuralchen/SimSwap` upstream is vendored locally; license is CC BY-NC 4.0, so treat it as non-commercial / research-use only
+- `fomm`: official `AliaksandrSiarohin/first-order-model` upstream is vendored locally; license is MIT
+- `faceshifter`: vendored local tree is `maum-ai/faceshifter`, which is an unofficial AEI-focused implementation rather than the canonical official release; license is BSD 3-Clause, but trustworthy pretrained weights were not established
+- `reface`: official `Sanoojan/REFace` upstream is vendored locally; license is MIT; this is the strongest current replacement for the retired `faceshifter` slot
+- `advfacegan`: preserved upstream tree is present locally and the wrapper is verified, but the vendored tree does not currently include a clear top-level license file; treat source provenance as present but license status as needing tighter confirmation
+- `mordiff`: official upstream morphing script is vendored locally; the README states CC BY-NC-SA 4.0 and explicitly restricts use to research purposes rather than product development or competitions
+- `dim`: native source import is from `zblasingame/Greedy-DiM`; the vendored repo license is MIT, but the runnable morphing code is encrypted and gated behind the CITeR release-form process
+- `mipgan`: local tree currently contains the official NTNU public portal snapshot rather than the runnable native package; public users are instructed to sign the license form and request the password for the code-and-model archive
+- `diffae`: vendored dependency used by `mordiff`; license is MIT
+
+Working interpretation
+- strongest permissive-license provenance in the active set is currently `fomm`, `reface`, and `diffae`
+- strongest research-only / non-commercial provenance in the active set is currently `simswap` and `mordiff`
+- most important remaining source / licensing ambiguity to clean up is `advfacegan`
+- most important gated-release methods are `dim` and `mipgan`
 
 Presentation notes
 - Present at least:

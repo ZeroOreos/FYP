@@ -11,7 +11,6 @@ import logging
 import base64
 import threading
 import random
-from turtle import left, right
 import numpy as np
 from typing import Callable, List, Tuple, Union
 from PIL import Image,ImageDraw

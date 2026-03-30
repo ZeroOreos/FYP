@@ -11,6 +11,7 @@ from Modifiers.attack.shared import build_output_path, copy_image_file, external
 from Modifiers.attack.shared import external_backend_extra_lines, find_latest_file, load_pair_rows, make_record
 from Modifiers.attack.shared import prepare_pair_workdir, print_run_header, require_existing_paths
 from Modifiers.attack.shared import resolve_external_backend_args, run_command, write_summary
+from Utility.runtime import resolve_torch_device
 
 
 DEFAULTS = external_backend_defaults(
@@ -34,6 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, default=None)
     parser.add_argument("--python-bin", type=str, default=sys.executable)
     parser.add_argument("--work-dir", type=Path, default=None)
+    parser.add_argument("--device", choices=("auto", "cuda", "mps", "cpu"), default="auto")
     parser.add_argument("--ddim-steps", type=int, default=50)
     parser.add_argument("--scale", type=float, default=3.5)
     parser.add_argument("--seed", type=int, default=42)
@@ -74,7 +76,7 @@ def build_command(
     outdir = pair_dir / "run"
     base_dir = pair_dir / "base"
     cmd = [
-        args.python_bin,
+        str(Path(args.python_bin).absolute()),
         str(args.entry_script),
         "--outdir",
         str(outdir),
@@ -128,6 +130,8 @@ def build_env_updates(args: argparse.Namespace) -> dict[str, str]:
     if taming_dir is not None:
         pythonpath_parts.append(str(taming_dir))
     return {
+        "FYP_TORCH_DEVICE": resolve_torch_device(args.device),
+        "PYTORCH_ENABLE_MPS_FALLBACK": "1",
         "MPLCONFIGDIR": str(matplotlib_dir),
         "PYTHONPATH": ":".join(pythonpath_parts),
         "HF_HOME": str(hf_home),
@@ -158,7 +162,7 @@ def main() -> None:
             entry_script=args.entry_script,
             checkpoint=args.checkpoint,
             config=args.config,
-            note="backend fidelity: best effort wrapper around the official REFace repository; CPU execution is a patched approximation of the original CUDA-first path",
+            note="backend fidelity: best effort wrapper around the official REFace repository; device auto-selection follows cuda -> mps -> cpu",
         ),
     )
 
@@ -197,7 +201,7 @@ def main() -> None:
         records=records,
         extra_summary={
             "backend_type": "external_wrapper",
-            "fidelity_note": "Best-effort wrapper around the official REFace repository layout. CPU execution here is a patched best attempt, not a byte-faithful reproduction of the original CUDA-first environment.",
+            "fidelity_note": "Best-effort wrapper around the official REFace repository layout with patched device routing. Auto device selection follows cuda -> mps -> cpu rather than the original CUDA-first assumption.",
         },
     )
 

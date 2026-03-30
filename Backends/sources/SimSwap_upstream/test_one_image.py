@@ -2,6 +2,7 @@
 import cv2
 import torch
 import fractions
+import os
 import numpy as np
 from PIL import Image
 import torch.nn.functional as F
@@ -34,7 +35,26 @@ if __name__ == '__main__':
     torch.nn.Module.dump_patches = True
     model = create_model(opt)
     model.eval()
-    device = torch.device('cuda:%d' % opt.gpu_ids[0]) if opt.gpu_ids and torch.cuda.is_available() else torch.device('cpu')
+    requested = os.environ.get("FYP_TORCH_DEVICE", "").strip().lower()
+    if requested in ("", "auto"):
+        if opt.gpu_ids and torch.cuda.is_available():
+            device = torch.device('cuda:%d' % opt.gpu_ids[0])
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = torch.device("mps")
+        else:
+            device = torch.device('cpu')
+    elif requested == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("SimSwap requested CUDA but CUDA is not available.")
+        device = torch.device('cuda:%d' % (opt.gpu_ids[0] if opt.gpu_ids else 0))
+    elif requested == "mps":
+        if not hasattr(torch.backends, "mps") or not torch.backends.mps.is_available():
+            raise RuntimeError("SimSwap requested MPS but MPS is not available.")
+        device = torch.device("mps")
+    elif requested == "cpu":
+        device = torch.device("cpu")
+    else:
+        raise ValueError(f"Unsupported FYP_TORCH_DEVICE for SimSwap: {requested}")
 
     with torch.no_grad():
         

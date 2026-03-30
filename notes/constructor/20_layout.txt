@@ -1,12 +1,12 @@
 # Constructor Layout
 
 Top-level structure
-- `Backends/`: third-party attack-method source snapshots, backend assets, and backend workdirs
+- `Backends/`: third-party attack and defense source snapshots, backend assets, and backend workdirs
 - `Dataset/`: clean and derived datasets plus shared pair files
-- `Models/`: recognition backbones and embedding generators
+- `Models/`: recognition backbones plus attack and protection wrapper entrypoints
 - `Recognition/`: clean / corruption / protection verification pipeline
 - `Attack/`: attack pairing, attack metadata, and attack evaluation
-- `Modifiers/`: preprocessing, protection, and attack wrappers
+- `Modifiers/`: preprocessing transforms and shared modifier utilities
 - `Results/`: embeddings, metrics, compiled results, and parsed tables
 - `Utility/`: shared runtime, path, and result helpers
 - `notes/`: constructor docs, working logs, and references
@@ -19,3 +19,26 @@ Key files
 - `Attack/pairs.py`: hard / semi-hard attack pair generation
 - `Attack/materialize.py`: attack dataset materialization
 - `Models/<Model>/generate.py`: dataset root to embeddings
+- `Models/attack/<method>/`: attack wrapper entrypoints and model-specific orchestration
+- `Models/protection/<method>/`: protection / detection wrapper entrypoints and model-specific orchestration
+
+Planned wrapper layout rule
+- Attack and protection wrappers should live adjacent to each other under `Models/` rather than being split across `Modifiers/`
+- Preferred target layout is:
+- `Models/attack/<method>/` for attack wrappers
+- `Models/protection/<method>/` for protection / detection wrappers
+- `Modifiers/` should be kept for preprocessing transforms and truly shared modifier utilities
+
+Planned backend layout rule
+- Attack and protection models should follow the same external-backend pattern
+- Preferred target layout is:
+- `Backends/sources/attack/<Name>_upstream/`
+- `Backends/sources/protection/<Name>_upstream/`
+- `Backends/sources/dependencies/`
+- `Backends/assets/attack/<method>/`
+- `Backends/assets/protection/<method>/`
+- `Backends/workdirs/attack/<method>/`
+- `Backends/workdirs/protection/<method>/`
+- Protection-model runtime rule:
+- give each protection model its own runtime env under `Backends/workdirs/protection/<method>/`
+- prefer accelerator order `cuda -> mps -> cpu` unless a model-specific note proves a different order is needed

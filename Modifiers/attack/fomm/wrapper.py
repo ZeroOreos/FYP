@@ -11,6 +11,7 @@ from Modifiers.attack.shared import build_output_path, copy_image_file, create_s
 from Modifiers.attack.shared import external_backend_extra_lines, extract_first_frame_ffmpeg, find_first_existing_file, find_latest_file
 from Modifiers.attack.shared import load_pair_rows, make_record, prepare_pair_workdir, print_run_header
 from Modifiers.attack.shared import require_existing_paths, resolve_external_backend_args, run_command, write_summary
+from Utility.runtime import resolve_torch_device
 
 
 DEFAULTS = external_backend_defaults(
@@ -20,20 +21,6 @@ DEFAULTS = external_backend_defaults(
     default_checkpoint="vox-cpk.pth.tar",
     default_config="config/vox-256.yaml",
 )
-
-
-def should_force_cpu(explicit: bool) -> bool:
-    if explicit:
-        return True
-    try:
-        import torch
-    except Exception:  # pragma: no cover
-        return False
-
-    if torch.cuda.is_available():
-        return False
-    mps = getattr(torch.backends, "mps", None)
-    return not bool(mps is not None and torch.backends.mps.is_available())
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--work-dir", type=Path, default=None)
     parser.add_argument("--fps", type=int, default=25)
     parser.add_argument("--seconds", type=float, default=1.0)
+    parser.add_argument("--device", choices=("auto", "cuda", "mps", "cpu"), default="auto")
     parser.add_argument("--force-cpu", action="store_true")
     parser.add_argument("--relative", action="store_true")
     parser.add_argument("--adapt-scale", action="store_true")
@@ -68,9 +56,10 @@ def parse_args() -> argparse.Namespace:
 def build_command(args: argparse.Namespace, source_path: Path, driving_video: Path, pair_dir: Path) -> tuple[list[str], Path]:
     if args.entry_script is None or args.config is None or args.checkpoint is None:
         raise ValueError("FOMM wrapper needs an entry script, config, and checkpoint. Put the backend source in Backends/sources/ and weights in Backends/assets/, or pass them explicitly.")
+    resolved_device = "cpu" if args.force_cpu else resolve_torch_device(args.device)
     result_video = pair_dir / "result.mp4"
     cmd = [
-        args.python_bin,
+        str(Path(args.python_bin).absolute()),
         str(args.entry_script),
         "--config",
         str(args.config),
@@ -83,7 +72,7 @@ def build_command(args: argparse.Namespace, source_path: Path, driving_video: Pa
         "--result_video",
         str(result_video),
     ]
-    if should_force_cpu(bool(args.force_cpu)):
+    if resolved_device == "cpu":
         cmd.append("--cpu")
     if args.relative:
         cmd.append("--relative")
@@ -96,7 +85,11 @@ def build_command(args: argparse.Namespace, source_path: Path, driving_video: Pa
 def build_env_updates(args: argparse.Namespace) -> dict[str, str]:
     matplotlib_dir = args.work_dir / "_matplotlib"
     matplotlib_dir.mkdir(parents=True, exist_ok=True)
-    return {"MPLCONFIGDIR": str(matplotlib_dir)}
+    return {
+        "FYP_TORCH_DEVICE": "cpu" if args.force_cpu else resolve_torch_device(args.device),
+        "PYTORCH_ENABLE_MPS_FALLBACK": "1",
+        "MPLCONFIGDIR": str(matplotlib_dir),
+    }
 
 
 def resolve_output_file(result_video: Path, pair_dir: Path) -> Path | None:
@@ -123,7 +116,7 @@ def main() -> None:
             entry_script=args.entry_script,
             checkpoint=args.checkpoint,
             config=args.config,
-            note="backend fidelity: best effort wrapper around external upstream repo; CPU mode auto-enabled when CUDA/MPS are unavailable",
+            note="backend fidelity: best effort wrapper around external upstream repo; device auto-selection follows cuda -> mps -> cpu",
         ),
     )
 

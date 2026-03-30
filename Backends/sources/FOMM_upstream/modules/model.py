@@ -1,7 +1,7 @@
 from torch import nn
 import torch
 import torch.nn.functional as F
-from modules.util import AntiAliasInterpolation2d, make_coordinate_grid
+from modules.util import AntiAliasInterpolation2d, make_coordinate_grid, resolve_tensor_options
 from torchvision import models
 import numpy as np
 from torch.autograd import grad
@@ -214,7 +214,7 @@ class GeneratorFullModel(torch.nn.Module):
                 normed_transformed = jacobian_transformed
                 value = torch.matmul(normed_driving, normed_transformed)
 
-                eye = torch.eye(2).view(1, 1, 2, 2).type(value.type())
+                eye = torch.eye(2, **resolve_tensor_options(value)).view(1, 1, 2, 2)
 
                 value = torch.abs(eye - value).mean()
                 loss_values['equivariance_jacobian'] = self.loss_weights['equivariance_jacobian'] * value
