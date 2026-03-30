@@ -14,6 +14,8 @@ DATASET_ROOT = PROJECT_ROOT / "Dataset"
 PAIRS_ROOT = DATASET_ROOT / "pairs"
 RESULTS_ROOT = PROJECT_ROOT / "Results"
 ATTACK_GENERATOR_ROOT = PROJECT_ROOT / "Modifiers" / "attack"
+RECOGNITION_ASSETS_ROOT = PROJECT_ROOT / "Backends" / "assets" / "recognition"
+RECOGNITION_WORKDIR_ROOT = PROJECT_ROOT / "Backends" / "workdirs" / "recognition"
 
 THROTTLE_BATCH_SIZE = 32
 MODEL_THROTTLE_DELAYS = {
@@ -44,16 +46,28 @@ ATTACK_GENERATOR_SCRIPTS = {
 class ModelSpec(TypedDict):
     name: str
     generate_script: Path
+    python_bin: Path
+    extra_env: dict[str, str]
 
 
 MODELS: list[ModelSpec] = [
     {
         "name": "InsightFace",
         "generate_script": PROJECT_ROOT / "Models" / "InsightFace" / "generate.py",
+        "python_bin": RECOGNITION_WORKDIR_ROOT / "insightface" / "venv" / "bin" / "python",
+        "extra_env": {
+            "FYP_INSIGHTFACE_ROOT": str(RECOGNITION_ASSETS_ROOT / "insightface"),
+            "MPLCONFIGDIR": str(RECOGNITION_WORKDIR_ROOT / "insightface" / "matplotlib"),
+        },
     },
     {
         "name": "FaceNet",
         "generate_script": PROJECT_ROOT / "Models" / "FaceNet" / "generate.py",
+        "python_bin": RECOGNITION_WORKDIR_ROOT / "facenet" / "venv" / "bin" / "python",
+        "extra_env": {
+            "TORCH_HOME": str(RECOGNITION_ASSETS_ROOT / "facenet" / "torch"),
+            "MPLCONFIGDIR": str(RECOGNITION_WORKDIR_ROOT / "facenet" / "matplotlib"),
+        },
     },
 ]
 VERIFY_SCRIPT = PROJECT_ROOT / "Recognition" / "evaluate.py"
@@ -90,6 +104,8 @@ def validate_model_registry(models: list[ModelSpec]) -> None:
     for model in models:
         if not model["generate_script"].exists():
             raise FileNotFoundError(f"{model['name']} generate.py not found")
+        if not model["python_bin"].exists():
+            raise FileNotFoundError(f"{model['name']} python bin not found: {model['python_bin']}")
     if not VERIFY_SCRIPT.exists():
         raise FileNotFoundError(f"Shared verify.py not found: {VERIFY_SCRIPT}")
 

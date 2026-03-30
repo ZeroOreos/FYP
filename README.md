@@ -12,10 +12,24 @@ Face recognition. Attack evaluation. ERG4902 FYP.
 - `InsightFace`
 - `FaceNet`
 
+Recognition roles:
+
+- `InsightFace`: strong modern ArcFace-family baseline
+- `FaceNet`: classic baseline
+- planned `AdaFace`: quality-adaptive modern baseline
+- planned `MagFace`: quality-aware modern baseline
+
 ## Backend Order
 
 - PyTorch: `cuda -> mps -> cpu`
 - InsightFace / ONNX: `CoreML -> CUDA -> CPU`
+
+Recognition runtime layout:
+
+- `Backends/workdirs/recognition/facenet/venv`
+- `Backends/workdirs/recognition/insightface/venv`
+- `Backends/assets/recognition/facenet/`
+- `Backends/assets/recognition/insightface/`
 
 Warning: forced backend missing. Kaboom likely.
 

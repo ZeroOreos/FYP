@@ -27,7 +27,7 @@ Priority interpretation
 - Core current-phase benchmark families are face swap, reenactment, and adversarial impersonation because they align most directly with the current implemented verification-attack question
 - Morphing should remain represented, but it is supporting breadth for the broader deepfake benchmark rather than the sole center of the FYP
 - `mordiff` is enough to keep morphing in scope for the current phase even if `dim` or `mipgan` remain partial
-- `mipgan` and faithful native `dim` are useful additions, but they are not blockers for the current phase of the FYP
+- `mipgan` should be treated as optional enrichment only; faithful native `dim` and `mipgan` are useful additions, but they are not blockers for the current phase of the FYP
 
 Method labeling rule
 - In docs and writing, label each backend as one of:

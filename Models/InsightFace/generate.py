@@ -1,6 +1,7 @@
 # python3 generate.py <dataset_dir> <embeddings_out> [batch_delay] -> embeddings.npz
 
 import argparse
+import os
 import time
 from pathlib import Path
 from typing import List, Tuple
@@ -31,8 +32,10 @@ def collect_items(dataset_dir: Path) -> List[Tuple[Path, str]]:
 
 def build_app(provider: str | None = None) -> tuple[FaceAnalysis, list[str]]:
     providers = resolve_onnx_providers(provider)
+    root = os.environ.get("FYP_INSIGHTFACE_ROOT", "~/.insightface")
     app = FaceAnalysis(
         name="antelopev2",
+        root=root,
         providers=providers,
     )
     app.prepare(ctx_id=0, det_size=(640, 640))

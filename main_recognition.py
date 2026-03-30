@@ -64,7 +64,7 @@ def maybe_run_generate(
         print(f"[SKIP] {model['name']} embeddings exist")
         return embeddings_file
 
-    cmd = [sys.executable, str(model["generate_script"]), str(dataset_dir), str(embeddings_file)]
+    cmd = [str(model["python_bin"]), str(model["generate_script"]), str(dataset_dir), str(embeddings_file)]
     if throttle:
         delay = MODEL_THROTTLE_DELAYS.get(model["name"], 0.0)
         if model["name"] == "FaceNet":
@@ -72,7 +72,8 @@ def maybe_run_generate(
         elif model["name"] == "InsightFace":
             cmd.append(str(delay))
 
-    run_subprocess(cmd, f"{model['name']} generate -> {embeddings_file}", extra_env=env_overrides)
+    model_env = {**env_overrides, **model.get("extra_env", {})}
+    run_subprocess(cmd, f"{model['name']} generate -> {embeddings_file}", extra_env=model_env)
     return embeddings_file
 
 
@@ -90,7 +91,7 @@ def maybe_run_evaluate(
         return metrics_file
 
     cmd = [
-        sys.executable,
+        str(model["python_bin"]),
         str(VERIFY_SCRIPT),
         str(pairs_file),
         str(embeddings_file),
@@ -101,7 +102,8 @@ def maybe_run_evaluate(
     if ALLOW_MISSING_PAIRS:
         cmd.append("--allow-missing-pairs")
 
-    run_subprocess(cmd, f"{model['name']} evaluate -> {metrics_file}", extra_env=env_overrides)
+    model_env = {**env_overrides, **model.get("extra_env", {})}
+    run_subprocess(cmd, f"{model['name']} evaluate -> {metrics_file}", extra_env=model_env)
     return metrics_file
 
 

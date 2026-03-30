@@ -14,6 +14,8 @@ Project framing
 - Phase 1: build attack backends, pair generation, materialization, and verification evaluation
 - Phase 2: add prevention / detection methods and evaluate them against the generated manipulations, including local deployment constraints
 - Protection / prevention model space is part of the intended project structure, even where implementation is still incomplete
+- Recognition diversity matters because the current attack phase still depends on face-verification systems as the measurement instrument; avoid over-claiming from a single verifier
+- Current recognition anchor set is `InsightFace` plus `FaceNet`; best planned additions are `AdaFace` and optionally `MagFace`
 - Initial planned defense-model shortlist is `UniDefense`, `FaceShield`, `M2F2-Det`, and `RECCE`
 - Attack diversity matters because it creates a more realistic test bed for the later defensive phase, not because every backend is equally central to the thesis
 

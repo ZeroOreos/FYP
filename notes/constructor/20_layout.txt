@@ -32,6 +32,8 @@ Planned wrapper layout rule
 Planned backend layout rule
 - Attack and protection models should follow the same external-backend pattern
 - Preferred target layout is:
+- `Backends/assets/recognition/<model>/`
+- `Backends/workdirs/recognition/<model>/`
 - `Backends/sources/attack/<Name>_upstream/`
 - `Backends/sources/protection/<Name>_upstream/`
 - `Backends/sources/dependencies/`
@@ -39,6 +41,9 @@ Planned backend layout rule
 - `Backends/assets/protection/<method>/`
 - `Backends/workdirs/attack/<method>/`
 - `Backends/workdirs/protection/<method>/`
+- Recognition-model runtime rule:
+- give each recognizer its own runtime env under `Backends/workdirs/recognition/<model>/`
+- keep recognizer caches and downloaded weights under `Backends/assets/recognition/<model>/` rather than `~/.cache` or `~/.insightface`
 - Protection-model runtime rule:
 - give each protection model its own runtime env under `Backends/workdirs/protection/<method>/`
 - prefer accelerator order `cuda -> mps -> cpu` unless a model-specific note proves a different order is needed

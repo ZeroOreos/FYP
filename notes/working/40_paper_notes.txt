@@ -1,9 +1,21 @@
 # Paper Notes
 
 Current working shortlist
-- Family-complete target set is `simswap`, `reface`, `advfacegan`, `fomm`, `dim`, `mordiff`, with `mipgan` as today's next build target for the older GAN morph baseline
+- Family-complete target set is `simswap`, `reface`, `advfacegan`, `fomm`, `dim`, and `mordiff`; treat `mipgan` as optional enrichment rather than an active build priority
 - Keep `fomm` analytically separate as reenactment rather than mixing it directly into swap or morph conclusions
 - Prevention / detection evaluation with locally deployable defense models was always part of the intended FYP plan; the current repo state reflects attack-benchmark construction being implemented first
+
+Recognition-model interpretation
+- Current recognizer set is `InsightFace` plus `FaceNet`, which is enough for the current attack-verification phase but still a bit thin for stronger cross-verifier claims
+- `FaceNet`: classic baseline; useful as an older, simpler verifier reference point
+- `InsightFace`: strongest current anchor baseline; effectively an ArcFace-family modern verifier in the current repo
+- planned `AdaFace`: best next recognizer addition because it adapts more explicitly to image-quality variation, which is relevant when attacks introduce blur, artifacts, compression, or other probe degradation
+- planned `MagFace`: useful optional second addition because it makes face quality / embedding reliability more explicit in the recognition model behavior
+- practical recognizer roadmap: keep `InsightFace`, keep `FaceNet`, add `AdaFace`, optionally add `MagFace`
+- avoid growing a large recognizer zoo; the point is to reduce over-dependence on one verifier family, not to make recognizers the whole thesis
+- `FaceNet` may make aggregate evaluation look weaker because it is an older and usually weaker verifier than `InsightFace`; that is analytically useful, but it should not control the whole paper narrative
+- reporting rule: do not collapse `FaceNet` and `InsightFace` into one vague pooled headline; show recognizer-specific results first, then summarize cross-recognizer trends
+- interpretation rule: treat `FaceNet` as a legacy breadth baseline and `InsightFace` as the current modern anchor unless later recognizer additions change that balance
 
 Current verified working set as of 2026-03-29
 - Verified working set is `simswap`, `fomm`, `reface`, `advfacegan`, and `mordiff`
@@ -20,7 +32,7 @@ Current verified working set as of 2026-03-29
 - AdvFaceGAN now also has a successful one-pair MPS wrapper smoke test through `Backends/workdirs/advfacegan/venv_mps`
 - DiM should currently be described as an engineered recreation that runs locally rather than as a faithful native reproduction
 - further DiM development is not planned unless something materially changes in the upstream release situation
-- today's morphing development target is to build `mipgan`
+- `mipgan` should now be treated as a lower-priority optional GAN morph baseline rather than as a current blocker or day's main target
 - MPS-oriented Python 3.11 venvs now exist for `simswap`, `fomm`, `reface`, and `advfacegan`
 - current active-set MPS status:
 - `mordiff`: verified end to end
@@ -38,6 +50,10 @@ Runtime planning
 - Standardize on one canonical venv per model rather than one repo-wide Python stack
 - Track accelerator capability per model after local verification while also trying to build a practical MPS-capable venv path that all active models can use
 - Add a second accelerator-oriented env for a model only when the shared MPS-oriented path is not enough
+- Recognition models should also leave the shared system environment:
+- give each recognizer its own env under `Backends/workdirs/recognition/<model>/`
+- relocate recognizer caches and downloaded weights into `Backends/assets/recognition/<model>/`
+- current concrete targets are `Backends/workdirs/recognition/insightface/venv`, `Backends/workdirs/recognition/facenet/venv`, `Backends/assets/recognition/insightface/`, and `Backends/assets/recognition/facenet/`
 - Keep defense-model integration structurally consistent with the attack backends where practical:
 - preserve third-party source snapshots under `Backends/sources/attack/<Name>_upstream/` and `Backends/sources/protection/<Name>_upstream/`
 - keep mutable weights and support assets under `Backends/assets/attack/<method>/` and `Backends/assets/protection/<method>/`
