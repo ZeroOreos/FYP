@@ -11,7 +11,7 @@
     {
       "name": "advfacegan",
       "kind": "backend",
-      "status": "scaffolded",
+      "status": "verified",
       "repo_dir": "Backends/sources/AdvFaceGAN_upstream",
       "upstream_label": "AdvFaceGAN preserved upstream snapshot",
       "notes_ref": "notes/working/20_backend_adaptations.txt",
@@ -24,6 +24,20 @@
       "runtime_outputs": [
         "Backends/sources/AdvFaceGAN_upstream/output",
         "Backends/sources/AdvFaceGAN_upstream/tmp"
+      ]
+    },
+    {
+      "name": "dim",
+      "kind": "backend",
+      "status": "partial",
+      "repo_dir": "Backends/sources/DiM_native_upstream",
+      "upstream_label": "Greedy-DiM native upstream import with encrypted runner plus local approximation wrapper",
+      "notes_ref": "notes/working/20_backend_adaptations.txt",
+      "wrapper_ref": "Modifiers/attack/dim/wrapper.py",
+      "checkpoint_dir": "Backends/assets/dim",
+      "required_paths": [
+        "Backends/sources/DiM_native_upstream/README.md",
+        "Modifiers/attack/dim/wrapper.py"
       ]
     },
     {
@@ -61,7 +75,7 @@
     {
       "name": "mipgan",
       "kind": "backend",
-      "status": "scaffolded",
+      "status": "partial",
       "repo_dir": "Backends/sources/MIPGAN_upstream",
       "upstream_label": "MIPGAN placeholder upstream snapshot",
       "notes_ref": "notes/working/20_backend_adaptations.txt",
@@ -75,7 +89,7 @@
     {
       "name": "mordiff",
       "kind": "backend",
-      "status": "scaffolded",
+      "status": "verified",
       "repo_dir": "Backends/sources/MorDIFF_upstream",
       "upstream_label": "MorDIFF preserved upstream snapshot",
       "notes_ref": "notes/working/20_backend_adaptations.txt",
@@ -84,6 +98,12 @@
       "required_paths": [
         "Backends/sources/MorDIFF_upstream/README.md",
         "Modifiers/attack/mordiff/wrapper.py"
+      ],
+      "runtime_outputs": [
+        "tmp/mordiff_verify_out_native",
+        "tmp/mordiff_env_verify_out",
+        "tmp/mordiff_mps_venv_out",
+        "tmp/mordiff_wrapper_mps_out"
       ]
     },
     {
@@ -150,6 +170,21 @@
       ],
       "consumers": [
         "reface"
+      ]
+    },
+    {
+      "name": "diffae",
+      "kind": "dependency",
+      "status": "required-for-mordiff-and-dim-native",
+      "repo_dir": "Backends/sources/dependencies/diffae",
+      "upstream_label": "phizaz DiffAE support dependency",
+      "required_paths": [
+        "Backends/sources/dependencies/diffae/README.md",
+        "Backends/sources/dependencies/diffae/templates.py"
+      ],
+      "consumers": [
+        "mordiff",
+        "dim"
       ]
     }
   ]

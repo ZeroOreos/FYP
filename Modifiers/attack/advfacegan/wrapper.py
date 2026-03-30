@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import math
 from pathlib import Path
 from typing import Any
@@ -138,6 +139,27 @@ def total_variation_loss(delta: torch.Tensor) -> torch.Tensor:
     return horizontal + vertical
 
 
+def load_upstream_generator_class(repo_dir: Path) -> type[nn.Module]:
+    module_path = repo_dir / "AdvFaceGAN.py"
+    if not module_path.exists():
+        fallback_path = repo_dir / "defense" / "AdvFaceGAN.py"
+        if fallback_path.exists():
+            module_path = fallback_path
+        else:
+            raise FileNotFoundError(f"AdvFaceGAN generator module not found under {repo_dir}")
+
+    spec = importlib.util.spec_from_file_location("fyp_advfacegan_upstream", module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load AdvFaceGAN generator module from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    generator_class = getattr(module, "Generator", None)
+    if generator_class is None:
+        raise AttributeError(f"Generator class not found in {module_path}")
+    return generator_class
+
+
 def optimize_dual_identity_image(
     source: torch.Tensor,
     target: torch.Tensor,
@@ -202,6 +224,7 @@ def generate_with_checkpoint(
     source: torch.Tensor,
     target: torch.Tensor,
     checkpoint_path: Path,
+    repo_dir: Path,
     device: torch.device,
     max_perturbation: float,
     embedder: nn.Module,
@@ -209,13 +232,25 @@ def generate_with_checkpoint(
     checkpoint = torch.load(checkpoint_path, map_location=device)
     state_dict = checkpoint.get("generator", checkpoint)
 
-    generator = AdvFaceGANGenerator().to(device)
+    conv1_weight = state_dict.get("conv1.conv.weight")
+    if conv1_weight is None:
+        raise KeyError("AdvFaceGAN checkpoint is missing conv1.conv.weight")
+    expected_in_channels = int(conv1_weight.shape[1])
+
+    generator_class = load_upstream_generator_class(repo_dir)
+    generator = generator_class(is_target=(expected_in_channels == 6)).to(device)
     generator.load_state_dict(state_dict, strict=True)
     generator.eval()
 
     with torch.no_grad():
-        perturbation = torch.tanh(generator(source, target)) * max_perturbation
-        adv = torch.clamp(source + perturbation, min=-1.0, max=1.0)
+        if expected_in_channels == 6:
+            perturbation, adv = generator(source, target)
+        elif expected_in_channels == 3:
+            perturbation, adv = generator(source)
+        else:
+            raise ValueError(f"Unsupported AdvFaceGAN checkpoint input channels: {expected_in_channels}")
+        adv = torch.clamp(adv, min=-1.0, max=1.0)
+        perturbation = torch.clamp(adv - source, min=-max_perturbation, max=max_perturbation)
         source_embedding = embedder(source)
         target_embedding = embedder(target)
         adv_embedding = embedder(adv)
@@ -272,6 +307,7 @@ def main() -> None:
                     source=source,
                     target=target,
                     checkpoint_path=args.checkpoint,
+                    repo_dir=args.repo_dir,
                     device=device,
                     max_perturbation=float(args.max_perturbation),
                     embedder=embedder,

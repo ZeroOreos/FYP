@@ -7,6 +7,8 @@ These backends are intended to be as faithful to the original upstream repositor
 Expected layout:
 
 - `sources/AdvFaceGAN_upstream/`
+- `sources/DiM_upstream/`
+- `sources/DiM_native_upstream/`
 - `sources/FaceShifter_upstream/`
 - `sources/FOMM_upstream/`
 - `sources/MIPGAN_upstream/`
@@ -14,10 +16,18 @@ Expected layout:
 - `sources/REFace_upstream/`
 - `sources/SimSwap_upstream/`
 - `sources/dependencies/taming-transformers/`
+- `sources/dependencies/diffae/`
 - `assets/<method>/`
 - `workdirs/<method>/`
 
 Keep local wrapper code out of this folder. Backend source snapshots belong in `sources/`, mutable backend assets belong in `assets/`, and temporary scratch state belongs in `workdirs/`.
+
+Runtime policy:
+
+- Prefer one canonical runtime env per model under `workdirs/<method>/`
+- Keep model envs isolated instead of forcing one shared repo-wide PyTorch stack
+- Add an accelerator-oriented second env for a model only when needed and document it in the working notes
+- Track accelerator support per model after verification rather than assuming every model can share the same MPS-capable stack
 
 For the canonical inventory and local rules, see:
 

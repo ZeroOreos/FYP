@@ -10,6 +10,7 @@ Format
 - Upstream repo
 - Upstream snapshot
 - Local wrapper
+- Canonical runtime env
 - Accelerator status
 - Assets used
 - Verification date
@@ -20,6 +21,12 @@ Format
 - Local adaptations
 - Fidelity note
 - Remaining caveats
+
+Runtime policy
+- Move toward one canonical runtime env per model under `Backends/workdirs/<model>/`
+- Keep envs isolated by model rather than forcing a single repo-wide PyTorch stack
+- Record accelerator support per model in these notes after the env is proven locally
+- Add a second model-local env only when a distinct accelerator-oriented stack is genuinely needed
 
 Model: simswap
 - Status: verified
@@ -114,6 +121,9 @@ Model: faceshifter
 - unverified scaffold only
 - Remaining caveats:
 - no trustworthy pretrained AEI checkpoint found from official or clearly maintained sources
+- planning note:
+- do not reopen this backend for the active benchmark path unless a clearly trustworthy official or maintained checkpoint appears
+- `reface` is the accepted replacement for this face-swap slot in the current FYP plan
 
 Model: reface
 - Status: verified
@@ -185,64 +195,206 @@ Model: reface
 - verification used `--ddim-steps 1` for a practical smoke test, not a full-quality benchmark setting
 
 Model: advfacegan
-- Status: scaffolded
+- Status: verified
 - Upstream repo: intended preserved backend is `Backends/sources/AdvFaceGAN_upstream`
 - Upstream snapshot: local preserved repo clone present as of 2026-03-27; commit not yet pinned in this note
 - Local wrapper: `Modifiers/attack/advfacegan/wrapper.py`
 - Accelerator status:
-- not yet vetted
+- CUDA: upstream-oriented
+- CPU: wrapper-verified
+- CoreML / Apple path: not yet vetted
 - Assets used:
-- local approximation path currently present in the repo
-- Verification date: not yet re-verified after the external-wrapper rework
+- preserved upstream generator checkpoint `Backends/sources/AdvFaceGAN_upstream/defense/00940_generator.pth`
+- upstream sample images `Backends/sources/AdvFaceGAN_upstream/defense/clean.png` and `Backends/sources/AdvFaceGAN_upstream/defense/fake.png`
+- local FaceNet embedder path via `facenet_pytorch`
+- Verification date: 2026-03-29
+- Verification input: local one-pair smoke test under `tmp/advfacegan_verify_assets`
+- Verification output:
+- `tmp/advfacegan_verify_out/fake_demo/clean.png`
+- records:
+- `tmp/advfacegan_verify_records_checkpoint.json`
 - Working command:
-- not yet registered as verified
+- `python3 Modifiers/attack/advfacegan/generate.py Backends/sources/AdvFaceGAN_upstream/defense tmp/advfacegan_verify_assets/pairs.npz tmp/advfacegan_verify_out tmp/advfacegan_verify_records_checkpoint.json --generator-checkpoint Backends/sources/AdvFaceGAN_upstream/defense/00940_generator.pth --overwrite`
 - Local files patched:
-- current state not yet normalized into a verified preserved-upstream patch list
+- `Modifiers/attack/advfacegan/wrapper.py`
 - Local adaptations:
-- current repo state is a best-effort local recreation rather than a strict preserved-upstream wrapper
+- wrapper keeps the local optimization fallback for checkpoint-free runs
+- checkpoint-backed inference now dynamically loads the preserved upstream `Generator` class instead of forcing weights into the local recreation architecture
+- wrapper detects whether the checkpoint expects 3-channel source-only or 6-channel source-plus-target input from `conv1.conv.weight`
+- CPU smoke test was verified against the preserved upstream checkpoint and sample images
+- `Backends/assets/advfacegan/ckpts.zip` is not currently a usable verified source for this wrapper path
 - Fidelity note:
-- approximation / best attempt at original
+- best-effort wrapper around the preserved upstream repository with checkpoint-adapter behavior for local verification
 - Remaining caveats:
-- needs the same verification standard as `fomm`, `simswap`, and `reface`
+- not a byte-faithful original training or CUDA environment
+- verified checkpoint path currently uses the source-only upstream defense generator, so target-conditioning behavior still depends on which checkpoint is supplied
 
 Model: mordiff
-- Status: scaffolded
+- Status: verified
 - Upstream repo: intended preserved backend is `Backends/sources/MorDIFF_upstream`
 - Upstream snapshot: local preserved repo clone present as of 2026-03-27; commit not yet pinned in this note
 - Local wrapper: `Modifiers/attack/mordiff/wrapper.py`
+- Canonical runtime env:
+- CPU: `Backends/workdirs/mordiff/venv_cpu`
+- MPS: `Backends/workdirs/mordiff/venv_mps`
 - Accelerator status:
-- not yet vetted
+- CPU: verified via dedicated backend-local env
+- MPS / Apple Metal: verified via dedicated backend-local env
 - Assets used:
-- wrapper scaffold only
-- Verification date: not yet verified
+- upstream sample aligned images:
+- `Backends/sources/MorDIFF_upstream/test/aligned/001_03.png`
+- `Backends/sources/MorDIFF_upstream/test/aligned/019_03.png`
+- imported support dependency:
+- `Backends/sources/dependencies/diffae` at commit `00c57d3f626f28bf9ed8aff58d90baab25de3af4`
+- imported official DiffAE checkpoint assets:
+- `Backends/sources/dependencies/diffae/checkpoints/ffhq256_autoenc/last.ckpt`
+- `Backends/sources/dependencies/diffae/checkpoints/ffhq256_autoenc/latent.pkl`
+- Verification date: 2026-03-29
+- Verification input: local one-pair smoke test under `tmp/mordiff_verify_assets`
+- Verification output:
+- fallback smoke-test output:
+- `tmp/mordiff_verify_out/019_03_demo/001_03.png`
+- checkpoint-backed native smoke-test output:
+- `tmp/mordiff_verify_out_native/019_03_demo/001_03.png`
+- env-backed checkpoint smoke-test output:
+- `tmp/mordiff_env_verify_out/019_03_demo/001_03.png`
+- MPS env-backed native smoke-test output:
+- `tmp/mordiff_mps_venv_out/morph_001_03_and_019_03.png`
+- MPS wrapper smoke-test output:
+- `tmp/mordiff_wrapper_mps_out/019_03_demo/001_03.png`
+- latest native-attempt records:
+- `tmp/mordiff_verify_records_native.json`
+- env-backed records:
+- `tmp/mordiff_env_verify_records.json`
+- MPS wrapper records:
+- `tmp/mordiff_wrapper_mps_records.json`
+- records:
+- `tmp/mordiff_verify_records.json`
 - Working command:
-- not yet verified
+- smoke-test command:
+- `python3 Modifiers/attack/mordiff/generate.py Backends/sources/MorDIFF_upstream/test/aligned tmp/mordiff_verify_assets/pairs.npz tmp/mordiff_verify_out tmp/mordiff_verify_records.json --overwrite`
+- checkpoint-backed reduced native smoke-test command:
+- `python3 Modifiers/attack/mordiff/generate.py Backends/sources/MorDIFF_upstream/test/aligned tmp/mordiff_verify_assets/pairs.npz tmp/mordiff_verify_out_native tmp/mordiff_verify_records_native.json --overwrite --extra-arg=--stochastic-steps --extra-arg=20 --extra-arg=--render-steps --extra-arg=2 --extra-arg=--save-midpoint-only`
+- env-backed reduced native smoke-test command:
+- `Backends/workdirs/mordiff/venv_cpu/bin/python Modifiers/attack/mordiff/generate.py Backends/sources/MorDIFF_upstream/test/aligned tmp/mordiff_verify_assets/pairs.npz tmp/mordiff_env_verify_out tmp/mordiff_env_verify_records.json --overwrite --extra-arg=--stochastic-steps --extra-arg=--render-steps --extra-arg=2 --extra-arg=--save-midpoint-only`
+- MPS native smoke-test command:
+- `MPLCONFIGDIR=tmp/mpl_mordiff_venv_mps Backends/workdirs/mordiff/venv_mps/bin/python Backends/sources/MorDIFF_upstream/morph_two_images.py --img1 Backends/sources/MorDIFF_upstream/test/aligned/001_03.png --img2 Backends/sources/MorDIFF_upstream/test/aligned/019_03.png --output tmp/mordiff_mps_venv_out --device mps --stochastic-steps 5 --render-steps 2 --save-midpoint-only`
+- MPS wrapper smoke-test command:
+- `MPLCONFIGDIR=tmp/mpl_mordiff_wrapper_mps Backends/workdirs/mordiff/venv_mps/bin/python Modifiers/attack/mordiff/generate.py Backends/sources/MorDIFF_upstream/test/aligned tmp/mordiff_verify_assets/pairs.npz tmp/mordiff_wrapper_mps_out tmp/mordiff_wrapper_mps_records.json --overwrite --python-bin Backends/workdirs/mordiff/venv_mps/bin/python --extra-arg=--device --extra-arg=mps --extra-arg=--stochastic-steps --extra-arg=5 --extra-arg=--render-steps --extra-arg=2 --extra-arg=--save-midpoint-only`
 - Local files patched:
 - `Modifiers/attack/mordiff/wrapper.py`
+- `Backends/sources/MorDIFF_upstream/morph_two_images.py`
+- `Backends/sources/dependencies/diffae/experiment.py`
+- `Backends/sources/dependencies/diffae/dataset.py`
+- `Backends/sources/dependencies/diffae/lmdb_writer.py`
+- `Backends/sources/dependencies/diffae/metrics.py`
 - Local adaptations:
 - wrapper scaffold aligned to the shared external-backend pattern
+- wrapper invocation itself is wired correctly against the preserved upstream `morph_two_images.py` entry script
+- patched `Backends/sources/MorDIFF_upstream/morph_two_images.py` so it resolves the cloned local DiffAE dependency under `Backends/sources/dependencies/diffae` instead of hardcoding `./diffae-master`
+- patched the same script for CPU-safe device selection and PyTorch 2.6-safe checkpoint loading
+- added explicit smoke-test flags to the same script so checkpoint-backed runs can reduce stochastic steps, reduce render steps, and save only the midpoint morph image when a practical CPU verification is needed
+- patched `Backends/sources/dependencies/diffae/experiment.py` for NumPy 2.x compatibility by replacing the removed `numpy.lib.function_base.flip` import
+- patched `Backends/sources/dependencies/diffae/dataset.py` and `Backends/sources/dependencies/diffae/lmdb_writer.py` so missing `lmdb` only fails when LMDB-backed dataset paths are actually used
+- patched `Backends/sources/dependencies/diffae/metrics.py` so optional evaluation-only dependencies such as `pytorch_fid` and `lpips` are imported lazily instead of blocking inference-only use
+- patched the same MorDIFF script so midpoint-only smoke-test mode no longer crashes after saving the native morph image
+- tightened the wrapper so fallback blending only triggers for recognizable missing-dependency or missing-asset states instead of any generic non-zero subprocess exit
+- fixed wrapper output resolution so it ignores the `result/` directory itself and copies the actual generated morph image back into the FYP output layout
+- built a dedicated backend-local virtualenv at `Backends/workdirs/mordiff/venv_cpu` using the known-working CPU package stack
+- built a second dedicated backend-local virtualenv at `Backends/workdirs/mordiff/venv_mps` using Homebrew Python 3.11 plus a MorDIFF-compatible MPS package stack
+- wrapper now prefers that dedicated MorDIFF interpreter automatically when it exists, while still allowing `--python-bin` override
+- confirmed the wrapper path itself now succeeds on MPS through `Backends/workdirs/mordiff/venv_mps`
+- when the upstream script fails specifically because the local DiffAE dependency tree is missing, the wrapper can still emit a deterministic 50/50 blend image as a last-resort smoke-test fallback and record that explicitly
 - Fidelity note:
-- best-attempt external wrapper, not yet verified
+- best-effort external wrapper around the native MorDIFF script with the official DiffAE checkpoint and local compatibility patches; checkpoint-backed CPU and reduced-step MPS smoke tests now complete successfully
 - Remaining caveats:
-- checkpoint and runnable-path verification still pending
+- imported DiffAE support code removes the old `templates` import-path blocker and the official checkpoint is now present locally
+- current verified native smoke test uses reduced steps and midpoint-only output to stay practical on CPU; this is suitable for verification, not for claiming full-quality benchmark settings
+- current verified MPS path also uses reduced steps and midpoint-only output; use it as a native acceleration proof path, not as a full benchmark-quality setting
+- full default-step CPU runs may still be impractically slow or unstable on this machine
+
+Model: dim
+- Status: partial
+- Upstream repo: native import is `Backends/sources/DiM_native_upstream` from `zblasingame/Greedy-DiM`
+- Upstream snapshot: imported 2026-03-29 at commit `37adc6047a17d844b64af27fce9018d034c93c18`
+- Local wrapper: `Modifiers/attack/dim/wrapper.py`
+- Accelerator status:
+- CPU: wrapper-verified
+- CUDA / CoreML path: not yet specialized
+- Assets used:
+- local approximation wrapper only
+- native upstream import:
+- `Backends/sources/DiM_native_upstream`
+- native runner state:
+- `Backends/sources/DiM_native_upstream/run_dim.py.gpg`
+- release gate form:
+- `Backends/sources/DiM_native_upstream/CITeR_SoftwareReleaseAgreeement.docx`
+- verification sample images:
+- `Backends/sources/MorDIFF_upstream/test/aligned/001_03.png`
+- `Backends/sources/MorDIFF_upstream/test/aligned/019_03.png`
+- Verification date: 2026-03-29
+- Verification input: local one-pair smoke test under `tmp/dim_verify_assets`
+- Verification output:
+- `tmp/dim_verify_out/019_03_demo/001_03.png`
+- records:
+- `tmp/dim_verify_records.json`
+- Working command:
+- `python3 Modifiers/attack/dim/generate.py Backends/sources/MorDIFF_upstream/test/aligned tmp/dim_verify_assets/pairs.npz tmp/dim_verify_out tmp/dim_verify_records.json --overwrite`
+- Local files patched:
+- `Modifiers/attack/dim/wrapper.py`
+- `Modifiers/attack/dim/generate.py`
+- `Modifiers/attack/dim/README.md`
+- `Utility/runtime.py`
+- `Backends/manifest.json`
+- `Backends/README.md`
+- Local adaptations:
+- added a first-class local DiM approximation backend slot for pipeline integration
+- wrapper uses a face-centered soft mask, color-statistics alignment, and symmetric blending to create a deterministic morph-like probe
+- native Greedy-DiM / DiM source was imported, but its runnable morphing script remains encrypted and requires the upstream passphrase-release process
+- local smoke test was re-confirmed after native-source import using `tmp/dim_verify_out/019_03_demo/001_03.png` and `tmp/dim_verify_records.json`
+- no claim is made that the current smoke-tested wrapper is a faithful reproduction of the native DiM release
+- Fidelity note:
+- approximation / best attempt for smoke testing and pipeline continuity
+- Remaining caveats:
+- exact native repo snapshot is now imported, but runnable code access is still gated by the upstream release process
+- the CITeR software release agreement text does not appear to require a US-affiliated institution in general; it says software may be available to researchers outside CITeR after a signed release agreement, and requires the requestor supervisor signature
+- the US Government language in the release form is a special indemnification carve-out checkbox, not the general eligibility rule
+- the imported native implementation also expects DiffAE and ArcFace assets before it can be executed faithfully
+- this path is suitable for local smoke tests, not yet for paper claims about faithful DiM reproduction
+
+Diffusion morph fallback shortlist if DiM remains gated
+- keep `dim` in the repo and in the paper as the preferred modern diffusion morph target, but describe it as gated rather than dropped
+- evaluate `LADIMO` next as the strongest known latent-diffusion fallback candidate with official code presence, while noting that its official code and pretrained models also appear to be distributed by request
+- keep `StableMorph` as a newer candidate to inspect for runnable public release status before committing implementation effort
 
 Model: mipgan
-- Status: scaffolded
+- Status: partial
 - Upstream repo: intended preserved backend is `Backends/sources/MIPGAN_upstream`
 - Upstream snapshot: placeholder repo directory only as of 2026-03-27
 - Local wrapper: `Modifiers/attack/mipgan/wrapper.py`
 - Accelerator status:
 - not yet vetted
 - Assets used:
-- placeholder wrapper path only
-- Verification date: not yet verified
+- local fallback wrapper path only
+- verification sample images:
+- `Backends/sources/MorDIFF_upstream/test/aligned/001_03.png`
+- `Backends/sources/MorDIFF_upstream/test/aligned/019_03.png`
+- Verification date: 2026-03-29
+- Verification input: local one-pair smoke test under `tmp/mipgan_verify_assets`
+- Verification output:
+- fallback smoke-test output:
+- `tmp/mipgan_verify_out/019_03_demo/001_03.png`
+- records:
+- `tmp/mipgan_verify_records.json`
 - Working command:
-- not yet verified
+- smoke-test command:
+- `python3 Modifiers/attack/mipgan/generate.py Backends/sources/MorDIFF_upstream/test/aligned tmp/mipgan_verify_assets/pairs.npz tmp/mipgan_verify_out tmp/mipgan_verify_records.json --overwrite`
 - Local files patched:
 - `Modifiers/attack/mipgan/wrapper.py`
 - Local adaptations:
 - wrapper scaffold aligned to the shared external-backend pattern
+- when no local upstream entry script is present, the wrapper now emits a deterministic 50/50 blend image as a smoke-test fallback and records that explicitly
 - Fidelity note:
-- best-attempt external wrapper, not yet verified
+- best-attempt external wrapper; smoke test can succeed locally, but no upstream MIPGAN implementation is currently present in the repo
 - Remaining caveats:
-- backend and checkpoint provenance still need to be established
+- backend source provenance, runnable entry script, and checkpoint provenance still need to be established

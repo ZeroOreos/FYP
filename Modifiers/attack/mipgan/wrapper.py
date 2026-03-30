@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from Modifiers.attack.shared import build_extra_args, build_output_path, copy_image_file, external_backend_defaults
 from Modifiers.attack.shared import external_backend_extra_lines, find_first_existing_file, find_latest_file
 from Modifiers.attack.shared import load_pair_rows, make_record, prepare_pair_workdir, print_run_header
@@ -70,6 +72,16 @@ def resolve_output_file(result_path: Path, pair_dir: Path) -> Path | None:
     return find_first_existing_file([result_path]) or find_latest_file(pair_dir, ("**/*.png", "**/*.jpg", "**/*.jpeg"))
 
 
+def fallback_mipgan_blend(source_path: Path, target_path: Path, output_path: Path) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(source_path) as src_image, Image.open(target_path) as tgt_image:
+        src_rgb = src_image.convert("RGB")
+        tgt_rgb = tgt_image.convert("RGB").resize(src_rgb.size)
+        blended = Image.blend(src_rgb, tgt_rgb, alpha=0.5)
+        blended.save(output_path)
+    return output_path
+
+
 def main() -> None:
     args = parse_args()
     require_existing_paths(args.dataset_dir, args.pair_input)
@@ -101,6 +113,19 @@ def main() -> None:
             records.append(make_record(index=index, row=row, output_path=output_path, status="skipped", message="output already exists", source_path=source_path, target_path=target_path))
             continue
         try:
+            if args.entry_script is None:
+                fallback_mipgan_blend(source_path, target_path, output_path)
+                records.append(make_record(
+                    index=index,
+                    row=row,
+                    output_path=output_path,
+                    status="ok",
+                    message="generated with local fallback blend because no MIPGAN upstream entry script is present",
+                    source_path=source_path,
+                    target_path=target_path,
+                ))
+                print(f"[WARN] Pair used local fallback blend {index}: no upstream MIPGAN entry script was found")
+                continue
             pair_dir = prepare_pair_workdir(args.work_dir, index)
             cmd, result_path = build_command(args, source_path, target_path, pair_dir)
             run_command(cmd, cwd=args.repo_dir, stage_name="mipgan")
@@ -121,7 +146,11 @@ def main() -> None:
         records_out=args.records_out,
         args=args,
         records=records,
-        extra_summary={"backend_type": "external_wrapper", "fidelity_note": "Best-effort wrapper around the original MIPGAN repository layout."},
+        extra_summary={
+            "backend_type": "external_wrapper",
+            "fidelity_note": "Best-effort wrapper around the original MIPGAN repository layout.",
+            "fallback_note": "When no upstream MIPGAN implementation is present locally, the wrapper can emit a deterministic 50/50 image blend as a smoke-test fallback.",
+        },
     )
 
 

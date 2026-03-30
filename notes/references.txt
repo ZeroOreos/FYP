@@ -43,7 +43,7 @@ Attack evaluation / further reading
 - [active] Li, L. et al. (2020). FaceShifter: Towards High Fidelity And Occlusion Aware Face Swapping.
   Link: https://lingzhili.com/FaceShifterPage/
   Used for: constructor attack shortlist and `faceshifter` backend scaffold.
-  Notes: Useful stronger face-swap baseline next to SimSwap. The local wrapper targets `maum-ai/faceshifter`, which is an unofficial AEI-only implementation. As of March 27, 2026, a trustworthy pretrained AEI checkpoint was not found from official or clearly maintained sources, so this method remains scaffolded but unverified.
+  Notes: Useful stronger face-swap baseline next to SimSwap. The local wrapper targets `maum-ai/faceshifter`, which is an unofficial AEI-only implementation. As of March 27, 2026, a trustworthy pretrained AEI checkpoint was not found from official or clearly maintained sources, so this method is retired from the active benchmark path and `reface` is used as its replacement.
 
 - [active] Siarohin, A. et al. (2019). First Order Motion Model for Image Animation.
   Link: https://aliaksandrsiarohin.github.io/first-order-model-website/
@@ -84,6 +84,16 @@ Attack evaluation / further reading
   Link: https://zblasingame.github.io/DiM/
   Used for: preferred modern morphing replacement / addition in the FYP shortlist.
   Notes: Strong current-trend morphing candidate if runnable code and checkpoints are available.
+
+- [active] Grimmer, M. and Busch, C. (2024). LADIMO: Face Morph Generation through Biometric Template Inversion with Latent Diffusion.
+  Link: https://arxiv.org/abs/2410.07988
+  Used for: modern diffusion-based morphing fallback candidate if DiM remains practically gated.
+  Notes: Official GitHub presence exists at `dasec/LADIMO`, but the repo README says to contact Christoph Busch to receive the official code and pre-trained models.
+
+- [active] Kabbani, W. et al. (2025). StableMorph: High-Quality Face Morph Generation with Stable Diffusion.
+  Link: https://arxiv.org/abs/2511.08090
+  Used for: newest diffusion-based morphing candidate to evaluate if an openly runnable implementation is needed beyond DiM and MorDIFF.
+  Notes: Recent IJCB 2025 / arXiv-era method. A public GitHub topic listing indicates a `christophbusch/StableMorph` repo exists, but local provenance and release openness still need confirmation before adoption.
 
 Implementation provenance used in this repo
 

@@ -27,6 +27,7 @@ TORCH_DEVICE_ENV = "FYP_TORCH_DEVICE"
 ONNX_PROVIDER_ENV = "FYP_ONNX_PROVIDER"
 ATTACK_METHODS = (
     "advfacegan",
+    "dim",
     "faceshifter",
     "fomm",
     "mipgan",

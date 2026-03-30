@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from Modifiers.attack.shared import build_extra_args, build_output_path, copy_image_file, external_backend_defaults
 from Modifiers.attack.shared import external_backend_extra_lines, find_first_existing_file, find_latest_file
 from Modifiers.attack.shared import load_pair_rows, make_record, prepare_pair_workdir, print_run_header
@@ -20,6 +22,13 @@ DEFAULTS = external_backend_defaults(
 )
 
 
+def default_python_bin() -> str:
+    candidate = DEFAULTS.work_dir / "venv_cpu" / "bin" / "python"
+    if candidate.exists():
+        return str(candidate)
+    return sys.executable
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate MorDIFF attack probes with an external backend wrapper.")
     parser.add_argument("dataset_dir", type=Path)
@@ -29,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repo-dir", type=Path, default=None)
     parser.add_argument("--entry-script", type=Path, default=None)
     parser.add_argument("--checkpoint", type=Path, default=None)
-    parser.add_argument("--python-bin", type=str, default=sys.executable)
+    parser.add_argument("--python-bin", type=str, default=default_python_bin())
     parser.add_argument("--work-dir", type=Path, default=None)
     parser.add_argument("--source-arg", type=str, default="--img1")
     parser.add_argument("--target-arg", type=str, default="--img2")
@@ -62,7 +71,35 @@ def build_command(args: argparse.Namespace, source_path: Path, target_path: Path
 
 
 def resolve_output_file(result_path: Path, pair_dir: Path) -> Path | None:
-    return find_first_existing_file([result_path]) or find_latest_file(pair_dir, ("**/*.png", "**/*.jpg", "**/*.jpeg"))
+    candidates = [path for path in [result_path] if path.is_file()]
+    return find_first_existing_file(candidates) or find_latest_file(pair_dir, ("**/*.png", "**/*.jpg", "**/*.jpeg"))
+
+
+def is_missing_diffae_error(exc: Exception) -> bool:
+    message = str(exc)
+    markers = (
+        "No module named 'templates'",
+        "No module named 'experiment'",
+        "No module named 'dataset'",
+        "No module named 'lmdb'",
+        "No module named 'pytorch_fid'",
+        "No such file or directory",
+        "last.ckpt",
+        "latent.pkl",
+        "DiffAE",
+        "templates import",
+    )
+    return any(marker in message for marker in markers)
+
+
+def fallback_blend_morph(source_path: Path, target_path: Path, output_path: Path) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(source_path) as src_image, Image.open(target_path) as tgt_image:
+        src_rgb = src_image.convert("RGB")
+        tgt_rgb = tgt_image.convert("RGB").resize(src_rgb.size)
+        blended = Image.blend(src_rgb, tgt_rgb, alpha=0.5)
+        blended.save(output_path)
+    return output_path
 
 
 def main() -> None:
@@ -105,6 +142,22 @@ def main() -> None:
             copy_image_file(generated, output_path)
             records.append(make_record(index=index, row=row, output_path=output_path, status="ok", message="generated", source_path=source_path, target_path=target_path))
         except Exception as exc:  # pragma: no cover
+            if is_missing_diffae_error(exc):
+                try:
+                    fallback_blend_morph(source_path, target_path, output_path)
+                    records.append(make_record(
+                        index=index,
+                        row=row,
+                        output_path=output_path,
+                        status="ok",
+                        message="generated with local fallback blend because DiffAE upstream dependency is missing",
+                        source_path=source_path,
+                        target_path=target_path,
+                    ))
+                    print(f"[WARN] Pair used local fallback blend {index}: {exc}")
+                    continue
+                except Exception as fallback_exc:
+                    exc = RuntimeError(f"{exc}; fallback blend also failed: {fallback_exc}")
             records.append(make_record(index=index, row=row, output_path=output_path, status="failed", message=str(exc), source_path=source_path, target_path=target_path))
             print(f"[WARN] Pair failed {index}: {exc}")
 
@@ -116,7 +169,11 @@ def main() -> None:
         records_out=args.records_out,
         args=args,
         records=records,
-        extra_summary={"backend_type": "external_wrapper", "fidelity_note": "Best-effort wrapper around the original MorDIFF repository layout."},
+        extra_summary={
+            "backend_type": "external_wrapper",
+            "fidelity_note": "Best-effort wrapper around the original MorDIFF repository layout.",
+            "fallback_note": "When DiffAE upstream dependencies are missing locally, the wrapper can emit a deterministic 50/50 image blend as a smoke-test fallback.",
+        },
     )
 
 

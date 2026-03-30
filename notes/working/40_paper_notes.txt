@@ -4,10 +4,24 @@ Current working shortlist
 - Family-complete target set is `simswap`, `reface`, `advfacegan`, `fomm`, `dim`, `mordiff`, with `mipgan` optional as the older GAN morph baseline
 - Keep `fomm` analytically separate as reenactment rather than mixing it directly into swap or morph conclusions
 
-Current verified working set as of 2026-03-27
-- Verified working set is `simswap`, `fomm`, and `reface`
-- `faceshifter` is blocked by missing trustworthy pretrained weights
-- `advfacegan`, `mordiff`, `mipgan`, and `dim` are not yet part of the verified working set
+Current verified working set as of 2026-03-29
+- Verified working set is `simswap`, `fomm`, `reface`, `advfacegan`, and `mordiff`
+- `faceshifter` should be treated as retired from the active benchmark plan; `reface` is the accepted replacement for that stronger face-swap slot
+- `mipgan` and `dim` are not yet part of the verified working set
+- `mipgan` and `dim` now have local smoke-test paths, but those paths should still be described as partial / approximation-grade rather than verified upstream-faithful backends
+- native upstream code is now imported for DiffAE support and for Greedy-DiM / DiM
+- MorDIFF now has the official DiffAE checkpoint locally and a successful checkpoint-backed native CPU smoke test using reduced-step midpoint-only settings
+- MorDIFF also now has a successful native MPS smoke test through `Backends/workdirs/mordiff/venv_mps`, again using reduced-step midpoint-only settings
+- MorDIFF wrapper-level MPS generation is now also confirmed through `tmp/mordiff_wrapper_mps_out/019_03_demo/001_03.png`
+- DiM faithful execution is still gated by the upstream encrypted code-release process
+- DiM local approximation smoke test remains healthy after the native-source import, so the pipeline slot is stable even though native faithfulness is still gated
+- keep `dim` in scope rather than scrapping it; frame the current problem as release gating, not method rejection
+- if `dim` remains unavailable in practice, the next diffusion-morph candidates to examine are `LADIMO` and then `StableMorph`, with the caveat that both still need provenance and openness checks before adoption
+
+Runtime planning
+- Standardize on one canonical venv per model rather than one repo-wide Python stack
+- Track accelerator capability per model after local verification instead of assuming shared MPS compatibility
+- Add a second accelerator-oriented env for a model only when the base model env is not enough
 
 Presentation notes
 - Present at least:
