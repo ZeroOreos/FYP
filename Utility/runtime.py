@@ -21,6 +21,8 @@ THROTTLE_BATCH_SIZE = 32
 MODEL_THROTTLE_DELAYS = {
     "InsightFace": 0.02,
     "FaceNet": 0.5,
+    "AdaFace": 0.0,
+    "MagFace": 0.0,
 }
 ALLOW_MISSING_PAIRS = True
 DEFAULT_TORCH_DEVICE = "auto"
@@ -67,6 +69,31 @@ MODELS: list[ModelSpec] = [
         "extra_env": {
             "TORCH_HOME": str(RECOGNITION_ASSETS_ROOT / "facenet" / "torch"),
             "MPLCONFIGDIR": str(RECOGNITION_WORKDIR_ROOT / "facenet" / "matplotlib"),
+            "PYTORCH_ENABLE_MPS_FALLBACK": "1",
+        },
+    },
+    {
+        "name": "AdaFace",
+        "generate_script": PROJECT_ROOT / "Models" / "AdaFace" / "generate.py",
+        "python_bin": RECOGNITION_WORKDIR_ROOT / "adaface" / "venv" / "bin" / "python",
+        "extra_env": {
+            "TORCH_HOME": str(RECOGNITION_ASSETS_ROOT / "adaface" / "torch"),
+            "MPLCONFIGDIR": str(RECOGNITION_WORKDIR_ROOT / "adaface" / "matplotlib"),
+            "FYP_ADAFACE_SOURCE_ROOT": str(PROJECT_ROOT / "Backends" / "sources" / "AdaFace_upstream"),
+            "FYP_ADAFACE_ASSET_ROOT": str(RECOGNITION_ASSETS_ROOT / "adaface"),
+            "PYTORCH_ENABLE_MPS_FALLBACK": "1",
+        },
+    },
+    {
+        "name": "MagFace",
+        "generate_script": PROJECT_ROOT / "Models" / "MagFace" / "generate.py",
+        "python_bin": RECOGNITION_WORKDIR_ROOT / "magface" / "venv" / "bin" / "python",
+        "extra_env": {
+            "TORCH_HOME": str(RECOGNITION_ASSETS_ROOT / "magface" / "torch"),
+            "MPLCONFIGDIR": str(RECOGNITION_WORKDIR_ROOT / "magface" / "matplotlib"),
+            "FYP_MAGFACE_SOURCE_ROOT": str(PROJECT_ROOT / "Backends" / "sources" / "MagFace_upstream"),
+            "FYP_MAGFACE_ASSET_ROOT": str(RECOGNITION_ASSETS_ROOT / "magface"),
+            "PYTORCH_ENABLE_MPS_FALLBACK": "1",
         },
     },
 ]

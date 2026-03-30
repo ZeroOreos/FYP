@@ -435,3 +435,71 @@ Model: mipgan
 - best-attempt external wrapper; the official public portal snapshot is now present in the repo, but the runnable native MIPGAN package is still not present locally
 - Remaining caveats:
 - official provenance is now established for the public portal snapshot, but the runnable entry script and pretrained models remain in the separate password-protected distribution package referenced by the portal README
+
+Recognition model: adaface
+- Status: bootstrapped
+- Upstream repo: preserved backend is `Backends/sources/AdaFace_upstream` from `mk-minchul/AdaFace`
+- Upstream snapshot: imported 2026-03-30 at commit `c60eaa786a42c03444f3df7096dbaf9d57ae010d`
+- Local wrapper: `Models/AdaFace/generate.py`
+- Accelerator status:
+- `cuda -> mps -> cpu` via shared `Utility/runtime.py`
+- MPS: verified outside sandbox
+- Assets used:
+- source snapshot: `Backends/sources/AdaFace_upstream`
+- asset root: `Backends/assets/recognition/adaface`
+- workdir root: `Backends/workdirs/recognition/adaface`
+- expected checkpoint path: `Backends/assets/recognition/adaface/pretrained/adaface_ir50_ms1mv2.ckpt`
+- Verification date: 2026-03-30
+- Verification input: `tmp/recognition_smoke/CelebA/motion_len9_smoke`
+- Verification output:
+- `tmp/recognition_smoke_out/adaface_embeddings.npz`
+- Working command:
+- `MPLCONFIGDIR=Backends/workdirs/recognition/adaface/matplotlib PYTORCH_ENABLE_MPS_FALLBACK=1 Backends/workdirs/recognition/adaface/venv/bin/python Models/AdaFace/generate.py tmp/recognition_smoke/CelebA/motion_len9_smoke tmp/recognition_smoke_out/adaface_embeddings.npz 2 0 --device auto --allow-random-init`
+- Local files patched:
+- `Models/AdaFace/generate.py`
+- `Utility/runtime.py`
+- `Backends/manifest.json`
+- `scripts/bootstrap_backends.py`
+- `README.md`
+- Local adaptations:
+- imported the native AdaFace source into the repo-owned external backend area and removed nested Git metadata after vendoring
+- added a repo-local AdaFace generator that loads the native backbone from the vendored upstream tree
+- runtime env now keeps AdaFace torch cache, matplotlib cache, assets, and venv under repo-owned recognition paths
+- smoke test was run with `--device auto` outside sandbox and resolved to `mps` on this machine
+- smoke test intentionally used random initialization because no pretrained AdaFace checkpoint is present locally yet
+- Fidelity note:
+- native-backbone external integration is wired and smoke-tested; benchmark-quality use still requires a real upstream checkpoint in the repo-owned asset path
+
+Recognition model: magface
+- Status: bootstrapped
+- Upstream repo: preserved backend is `Backends/sources/MagFace_upstream` from `IrvingMeng/MagFace`
+- Upstream snapshot: imported 2026-03-30 at commit `99bae614ac2643b9694bf18e0c5645272ff6acfa`
+- Local wrapper: `Models/MagFace/generate.py`
+- Accelerator status:
+- `cuda -> mps -> cpu` via shared `Utility/runtime.py`
+- MPS: verified outside sandbox
+- Assets used:
+- source snapshot: `Backends/sources/MagFace_upstream`
+- asset root: `Backends/assets/recognition/magface`
+- workdir root: `Backends/workdirs/recognition/magface`
+- expected checkpoint path: `Backends/assets/recognition/magface/pretrained/magface_iresnet100_ms1mv2.pth`
+- Verification date: 2026-03-30
+- Verification input: `tmp/recognition_smoke/CelebA/motion_len9_smoke`
+- Verification output:
+- `tmp/recognition_smoke_out/magface_embeddings.npz`
+- Working command:
+- `MPLCONFIGDIR=Backends/workdirs/recognition/magface/matplotlib PYTORCH_ENABLE_MPS_FALLBACK=1 Backends/workdirs/recognition/magface/venv/bin/python Models/MagFace/generate.py tmp/recognition_smoke/CelebA/motion_len9_smoke tmp/recognition_smoke_out/magface_embeddings.npz 2 0 --device auto --allow-random-init`
+- Local files patched:
+- `Models/MagFace/generate.py`
+- `Utility/runtime.py`
+- `Backends/manifest.json`
+- `scripts/bootstrap_backends.py`
+- `README.md`
+- Local adaptations:
+- imported the native MagFace source into the repo-owned external backend area and removed nested Git metadata after vendoring
+- added a repo-local MagFace generator that loads the native iResNet backbone from the vendored upstream tree
+- runtime env now keeps MagFace torch cache, matplotlib cache, assets, and venv under repo-owned recognition paths
+- smoke test was run with `--device auto` outside sandbox and resolved to `mps` on this machine
+- smoke test intentionally used random initialization because no pretrained MagFace checkpoint is present locally yet
+- Fidelity note:
+- native-backbone external integration is wired and smoke-tested; benchmark-quality use still requires a real upstream checkpoint in the repo-owned asset path

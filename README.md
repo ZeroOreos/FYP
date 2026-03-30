@@ -11,6 +11,8 @@ Face recognition. Attack evaluation. ERG4902 FYP.
 
 - `InsightFace`
 - `FaceNet`
+- `AdaFace`
+- `MagFace`
 
 Recognition roles:
 
@@ -28,8 +30,17 @@ Recognition runtime layout:
 
 - `Backends/workdirs/recognition/facenet/venv`
 - `Backends/workdirs/recognition/insightface/venv`
+- `Backends/workdirs/recognition/adaface/venv`
+- `Backends/workdirs/recognition/magface/venv`
 - `Backends/assets/recognition/facenet/`
 - `Backends/assets/recognition/insightface/`
+- `Backends/assets/recognition/adaface/`
+- `Backends/assets/recognition/magface/`
+
+Recognition external source layout:
+
+- `Backends/sources/AdaFace_upstream/`
+- `Backends/sources/MagFace_upstream/`
 
 Warning: forced backend missing. Kaboom likely.
 

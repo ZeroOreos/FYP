@@ -9,6 +9,38 @@
   },
   "entries": [
     {
+      "name": "adaface",
+      "kind": "recognition_backend",
+      "status": "bootstrapped",
+      "repo_dir": "Backends/sources/AdaFace_upstream",
+      "upstream_label": "AdaFace preserved upstream snapshot",
+      "notes_ref": "notes/working/20_backend_adaptations.txt",
+      "wrapper_ref": "Models/AdaFace/generate.py",
+      "checkpoint_dir": "Backends/assets/recognition/adaface",
+      "workdir_dir": "Backends/workdirs/recognition/adaface",
+      "required_paths": [
+        "Backends/sources/AdaFace_upstream/README.md",
+        "Backends/sources/AdaFace_upstream/inference.py",
+        "Models/AdaFace/generate.py"
+      ]
+    },
+    {
+      "name": "magface",
+      "kind": "recognition_backend",
+      "status": "bootstrapped",
+      "repo_dir": "Backends/sources/MagFace_upstream",
+      "upstream_label": "MagFace preserved upstream snapshot",
+      "notes_ref": "notes/working/20_backend_adaptations.txt",
+      "wrapper_ref": "Models/MagFace/generate.py",
+      "checkpoint_dir": "Backends/assets/recognition/magface",
+      "workdir_dir": "Backends/workdirs/recognition/magface",
+      "required_paths": [
+        "Backends/sources/MagFace_upstream/README.md",
+        "Backends/sources/MagFace_upstream/inference/gen_feat.py",
+        "Models/MagFace/generate.py"
+      ]
+    },
+    {
       "name": "advfacegan",
       "kind": "backend",
       "status": "verified",

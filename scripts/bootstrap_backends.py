@@ -125,8 +125,14 @@ def prepare_layout(manifest: dict) -> None:
         checkpoint_dir_str = entry.get("checkpoint_dir")
         if checkpoint_dir_str:
             resolve_path(checkpoint_dir_str).mkdir(parents=True, exist_ok=True)
-        if entry.get("kind") == "backend":
+        workdir_dir_str = entry.get("workdir_dir")
+        if workdir_dir_str:
+            workdir = resolve_path(workdir_dir_str)
+        elif entry.get("kind") == "backend":
             workdir = resolve_path(layout["workdirs_root"]) / entry["name"]
+        else:
+            workdir = None
+        if workdir is not None:
             workdir.mkdir(parents=True, exist_ok=True)
             gitkeep = workdir / ".gitkeep"
             gitkeep.touch(exist_ok=True)
