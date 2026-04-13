@@ -18,8 +18,8 @@ Recognition roles:
 
 - `InsightFace`: strong modern ArcFace-family baseline
 - `FaceNet`: classic baseline
-- planned `AdaFace`: quality-adaptive modern baseline
-- planned `MagFace`: quality-aware modern baseline
+- `AdaFace`: quality-adaptive modern baseline
+- `MagFace`: quality-aware modern baseline
 
 ## Backend Order
 
@@ -41,6 +41,12 @@ Recognition external source layout:
 
 - `Backends/sources/AdaFace_upstream/`
 - `Backends/sources/MagFace_upstream/`
+
+Protection runtime layout:
+
+- `Backends/workdirs/protection/<method>/venv`
+- `Backends/assets/protection/<method>/`
+- `Models/protection/<method>/wrapper.py`
 
 Warning: forced backend missing. Kaboom likely.
 

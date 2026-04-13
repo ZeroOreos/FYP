@@ -1,0 +1,536 @@
+Backend purge candidates across all backends
+Date: 2026-04-08
+
+Scope
+- This note widens the trim pass to all backend source / asset trees, including active backends.
+- Focus is `Backends/sources/**` and `Backends/assets/**`.
+- Deliberately excludes `Models/**/testing` per user direction.
+- Deliberately excludes `Backends/workdirs/**` from this list even though those trees contain many removable caches and package tests.
+
+Method
+- Checked the live wrapper / generator entrypoints first, then marked only files outside those paths.
+- Buckets:
+  - `safe now`: not on current wrapper path; docs, samples, notebooks, cache bookkeeping, duplicate or placeholder material
+  - `conditional`: removable if we only preserve the currently verified route, but could matter for alternate modes, training, or future validation
+  - `keep`: directly referenced by current wrapper / generator path
+
+Recognition backends
+====================
+
+AdaFace
+- Live path:
+  - `Models/AdaFace/generate.py`
+  - imports only `Backends/sources/AdaFace_upstream/net.py`
+  - checkpoint: `Backends/assets/recognition/adaface/pretrained/adaface_ir50_ms1mv2.ckpt`
+- Keep:
+  - `Backends/sources/AdaFace_upstream/net.py`
+  - `Backends/assets/recognition/adaface/pretrained/adaface_ir50_ms1mv2.ckpt`
+- Safe now:
+  - `Backends/sources/AdaFace_upstream/__pycache__/`
+  - `Backends/sources/AdaFace_upstream/assets/`
+  - `Backends/sources/AdaFace_upstream/face_alignment/`
+- Why:
+  - runtime never imports local alignment helpers, validation suites, or teaser assets
+- Size notes:
+  - `assets/` ~ `25M`
+  - `face_alignment/` ~ `17M`
+
+MagFace
+- Live path:
+  - `Models/MagFace/generate.py`
+  - imports only `Backends/sources/MagFace_upstream/models/iresnet.py`
+  - checkpoint: `Backends/assets/recognition/magface/pretrained/magface_iresnet100_ms1mv2.pth`
+- Keep:
+  - `Backends/sources/MagFace_upstream/models/iresnet.py`
+  - `Backends/assets/recognition/magface/pretrained/magface_iresnet100_ms1mv2.pth`
+- Safe now:
+  - `Backends/sources/MagFace_upstream/models/__pycache__/`
+  - `Backends/sources/MagFace_upstream/inference/examples.ipynb`
+  - `Backends/sources/MagFace_upstream/inference/toy_imgs/`
+  - `Backends/sources/MagFace_upstream/raw/`
+- Conditional:
+  - `Backends/sources/MagFace_upstream/eval/`
+  - `Backends/sources/MagFace_upstream/run/`
+  - `Backends/sources/MagFace_upstream/dataloader/`
+  - `Backends/sources/MagFace_upstream/utils/`
+- Why:
+  - generator path only builds `iresnet`; the rest is training / evaluation / demo support
+
+InsightFace
+- Live path:
+  - current runtime uses `Backends/assets/recognition/insightface/models/antelopev2/`
+- Safe now:
+  - `Backends/assets/recognition/insightface/models/antelopev2.zip`
+  - `Backends/assets/recognition/insightface/models/buffalo_l/`
+  - `Backends/assets/recognition/insightface/models/buffalo_l.zip`
+- Keep:
+  - `Backends/assets/recognition/insightface/models/antelopev2/`
+
+FaceNet
+- Already covered earlier; testing trees intentionally excluded from this pass.
+
+Attack backends
+===============
+
+DiM
+- Live path:
+  - `Modifiers/attack/dim/wrapper.py`
+  - local approximation only; native repo is not executed
+- Keep:
+  - no backend source file is required for current runnable path
+- Safe now:
+  - `Backends/sources/attack/DiM_native_upstream/.git/`
+  - `Backends/sources/attack/DiM_native_upstream/docs/assets/`
+- Conditional:
+  - `Backends/sources/attack/DiM_native_upstream/docs/`
+  - `Backends/sources/attack/DiM_native_upstream/CITeR_SoftwareReleaseAgreeement.docx`
+  - `Backends/sources/attack/DiM_native_upstream/run_dim.py.gpg`
+  - `Backends/sources/attack/DiM_native_upstream/configs/`
+  - `Backends/sources/attack/DiM_native_upstream/arcface/`
+- Why:
+  - current wrapper never imports the native repo, but those files are still provenance / future-native-run material
+
+MIPGAN
+- Live path:
+  - current wrapper falls back because no native entry script is present
+- Keep:
+  - no backend file is required for current fallback path
+- Conditional:
+  - `Backends/sources/attack/MIPGAN_upstream/README.md`
+  - `Backends/sources/attack/MIPGAN_upstream/MIPGAN-license-240916.pdf`
+- Why:
+  - folder is provenance only; deleting it will not change current fallback execution
+
+AdvFaceGAN
+- Live path:
+  - `Modifiers/attack/advfacegan/wrapper.py`
+  - local recreation path does not require upstream repo
+  - optional upstream generator class path may load `AdvFaceGAN.py` or `defense/AdvFaceGAN.py`
+  - optional checkpoint path loads `generator.pth` if provided
+- Keep for current default path:
+  - none strictly required under `Backends/sources/attack/AdvFaceGAN_upstream/`
+- Safe now:
+  - `Backends/assets/attack/advfacegan/ckpts.zip`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/fr_models/test/`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/picture/`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/1_prepDataset.ipynb`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/2_eval_fr.ipynb`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/3_eval_aliyun.ipynb`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/4_eval_tencent.ipynb`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/5_eval_faceplusplus.ipynb`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/6_hyperparam_experiment.ipynb`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/7_compare_experiment.ipynb`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/8_face++_api_experiment.ipynb`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/9_tencent_api_experiment.ipynb`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/10_aliyun_api_experiment.ipynb`
+- Conditional:
+  - `Backends/sources/attack/AdvFaceGAN_upstream/official_api/`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/test.py`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/train.py`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/config/`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/fr_models/`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/utils/`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/AdvFaceGANAttack.py`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/defense/clean.png`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/defense/fake.png`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/defense/ganimg.py`
+- Keep if preserving optional upstream-native route:
+  - `Backends/sources/attack/AdvFaceGAN_upstream/AdvFaceGAN.py`
+  - or `Backends/sources/attack/AdvFaceGAN_upstream/defense/AdvFaceGAN.py`
+  - `Backends/sources/attack/AdvFaceGAN_upstream/defense/00940_generator.pth`
+
+FOMM
+- Live path:
+  - `Modifiers/attack/fomm/wrapper.py`
+  - entry script `Backends/sources/attack/FOMM_upstream/demo.py`
+  - config `Backends/sources/attack/FOMM_upstream/config/vox-256.yaml`
+  - checkpoint `Backends/assets/attack/fomm/vox-cpk.pth.tar`
+- Keep:
+  - `Backends/sources/attack/FOMM_upstream/demo.py`
+  - `Backends/sources/attack/FOMM_upstream/config/vox-256.yaml`
+  - supporting imports reachable from `demo.py`
+  - `Backends/assets/attack/fomm/vox-cpk.pth.tar`
+- Safe now:
+  - `Backends/sources/attack/FOMM_upstream/demo.ipynb`
+  - `Backends/sources/attack/FOMM_upstream/demo_jupyter.ipynb`
+  - `Backends/sources/attack/FOMM_upstream/old_demo.ipynb`
+  - `Backends/sources/attack/FOMM_upstream/sup-mat/`
+- Conditional:
+  - configs not used by our route:
+    - `config/bair-256.yaml`
+    - `config/fashion-256.yaml`
+    - `config/mgif-256.yaml`
+    - `config/nemo-256.yaml`
+    - `config/taichi-256.yaml`
+    - `config/taichi-adv-256.yaml`
+    - `config/vox-adv-256.yaml`
+  - `Backends/sources/attack/FOMM_upstream/train.py`
+  - `Backends/sources/attack/FOMM_upstream/run.py`
+  - `Backends/sources/attack/FOMM_upstream/reconstruction.py`
+  - `Backends/sources/attack/FOMM_upstream/crop-video.py`
+  - `Backends/sources/attack/FOMM_upstream/data/`
+  - `Backends/sources/attack/FOMM_upstream/sync_batchnorm/unittest.py`
+- Size notes:
+  - `sup-mat/` ~ `76M`
+
+SimSwap
+- Live path:
+  - `Modifiers/attack/simswap/wrapper.py`
+  - entry script `Backends/sources/attack/SimSwap_upstream/test_one_image.py`
+- Keep:
+  - `Backends/sources/attack/SimSwap_upstream/test_one_image.py`
+  - modules imported by that script:
+    - `models/`
+    - `options/`
+    - `util/`
+    - `insightface_func/`
+    - `parsing_model/`
+  - assets used by the upstream script:
+    - `arcface_model/arcface_checkpoint.tar`
+    - `checkpoints/people/`
+- Safe now:
+  - `Backends/sources/attack/SimSwap_upstream/MultiSpecific.ipynb`
+  - `Backends/sources/attack/SimSwap_upstream/SimSwap colab.ipynb`
+  - `Backends/sources/attack/SimSwap_upstream/train.ipynb`
+  - `Backends/sources/attack/SimSwap_upstream/docs/`
+- Conditional:
+  - alternate batch / video entry scripts:
+    - `test_video_swap_multispecific.py`
+    - `test_video_swapmulti.py`
+    - `test_video_swapsingle.py`
+    - `test_video_swapspecific.py`
+    - `test_wholeimage_swap_multispecific.py`
+    - `test_wholeimage_swapmulti.py`
+    - `test_wholeimage_swapsingle.py`
+    - `test_wholeimage_swapspecific.py`
+  - `Backends/sources/attack/SimSwap_upstream/predict.py`
+  - `Backends/sources/attack/SimSwap_upstream/train.py`
+  - `Backends/sources/attack/SimSwap_upstream/pg_modules/`
+  - `Backends/sources/attack/SimSwap_upstream/simswaplogo/`
+- Why:
+  - safe bucket is pure docs / notebook material; conditional bucket is outside our selected one-image entrypoint but still useful for alternate modes
+
+REFace
+- See dedicated note:
+  - `notes/working/44_reface_mordiff_purge_candidates.txt`
+- Highest-confidence safe now:
+  - `Backends/assets/attack/reface/support/hf_cache/models--openai--clip-vit-large-patch14/.cache/`
+  - `Backends/assets/attack/reface/support/hf_home/`
+  - `Backends/assets/attack/reface/support/hf_cache/models--openai--clip-vit-large-patch14/flax_model.msgpack`
+  - `Backends/assets/attack/reface/support/hf_cache/models--openai--clip-vit-large-patch14/tf_model.h5`
+  - `Backends/sources/attack/REFace_upstream/eval_tool/`
+- Conditional:
+  - unused `Other_dependencies/*` bundles other than `face_parsing`
+  - alternate scripts, train configs, and one duplicate PyTorch CLIP weight file
+
+MorDIFF
+- See dedicated note:
+  - `notes/working/44_reface_mordiff_purge_candidates.txt`
+- Highest-confidence safe now:
+  - `Backends/sources/dependencies/diffae/.git/`
+  - `Backends/sources/dependencies/diffae/.vscode/`
+  - `Backends/sources/dependencies/diffae/__pycache__/`
+  - DiffAE notebooks, demo image folders, backup docs, and `run_*.py` helpers
+- Conditional:
+  - `Backends/sources/attack/MorDIFF_upstream/test/`
+  - DiffAE dataset resize helpers
+
+Shared dependency repo used by REFace: taming-transformers
+- Live role:
+  - REFace depends on this vendored repo
+- Safe now:
+  - `Backends/sources/dependencies/taming-transformers/assets/`
+  - `Backends/sources/dependencies/taming-transformers/scripts/reconstruction_usage.ipynb`
+  - `Backends/sources/dependencies/taming-transformers/scripts/taming-transformers.ipynb`
+- Conditional:
+  - `Backends/sources/dependencies/taming-transformers/data/`
+  - extra configs unrelated to the preserved REFace route
+- Why:
+  - assets and notebooks are presentation-only; sample data is likely not needed for inference but is large, so keep it conditional
+
+Protection backends
+===================
+
+DeepPrivacy2
+- Live path:
+  - `Models/protection/deepprivacy2/wrapper.py`
+  - runs `Backends/sources/protection/DeepPrivacy2_upstream/anonymize.py`
+  - uses default config `configs/anonymizers/face.py`
+  - env points to `Backends/assets/protection/deepprivacy2/torch_home`
+- Keep:
+  - `Backends/sources/protection/DeepPrivacy2_upstream/anonymize.py`
+  - `Backends/sources/protection/DeepPrivacy2_upstream/configs/anonymizers/face.py`
+  - required `dp2/`, `sg3_torch_utils/`, and config support tree
+  - checkpoint files in `Backends/assets/protection/deepprivacy2/torch_home/hub/checkpoints/`
+- Conditional:
+  - `Backends/sources/protection/DeepPrivacy2_upstream/gradio_demos/`
+  - `Backends/sources/protection/DeepPrivacy2_upstream/tools/`
+  - `Backends/sources/protection/DeepPrivacy2_upstream/attribute_guided_demo.py`
+  - many alternate anonymizer / dataset / train configs outside the face path
+  - if checksum reconfirms, one duplicate detector checkpoint alias under `torch_home/hub/checkpoints/`
+- Note:
+  - I previously observed one filename-hash duplicate here, but the current re-check should be redone carefully before deletion because the files are nested under `torch_home/hub/checkpoints/`
+
+FaceShield
+- Live path:
+  - `Models/protection/faceshield/wrapper.py`
+  - runs `Backends/sources/protection/FaceShield_upstream/attack.py`
+  - uses upstream unet configs and asset ArcFace checkpoints
+- Keep:
+  - `Backends/sources/protection/FaceShield_upstream/attack.py`
+  - `Backends/sources/protection/FaceShield_upstream/utils/`
+  - `Backends/assets/protection/faceshield/models/arcface50_checkpoint.tar`
+  - `Backends/assets/protection/faceshield/models/arcface100_checkpoint.tar`
+- Safe now:
+  - `Backends/sources/protection/FaceShield_upstream/assets/`
+  - `Backends/sources/protection/FaceShield_upstream/data/test/`
+- Conditional:
+  - `Backends/sources/protection/FaceShield_upstream/execute.sh`
+  - `Backends/sources/protection/FaceShield_upstream/run.sh`
+  - `Backends/sources/protection/FaceShield_upstream/environment.yaml`
+
+FALCO
+- Live path:
+  - `Models/protection/falco/wrapper.py`
+  - verified route in notes uses:
+    - ArcFace-only feature extraction
+    - `--no-clip --no-farl --no-dino`
+    - `stylegan2_ffhq512`
+- Keep for verified route:
+  - top-level stage scripts:
+    - `extract_features.py`
+    - `create_fake_dataset.py`
+    - `pair_nn.py`
+    - `invert.py`
+    - `anonymize.py`
+  - supporting `lib/` and `models/` code
+  - verified fake / inv / anon dataset outputs under `datasets/`
+  - `Backends/assets/protection/falco/models/pretrained/stylegan2_ffhq512.pth`
+- Safe now:
+  - `Backends/sources/protection/FALCO_upstream/figs/`
+- Conditional:
+  - `Backends/assets/protection/falco/models/pretrained/farl/`
+  - `Backends/assets/protection/falco/models/pretrained/stylegan2_ffhq1024.pth`
+  - `Backends/sources/protection/FALCO_upstream/doc/`
+  - `Backends/sources/protection/FALCO_upstream/visualize_dataset.py`
+  - converter / official-stylegan helper scripts under `models/genforce/converters/**`
+- Why:
+  - the verified route explicitly disables FaRL / CLIP / DINO and uses `stylegan2_ffhq512`, but keeping the optional assets remains safer unless we commit to that reduced route only
+- Size notes:
+  - `Backends/assets/protection/falco/models/pretrained/farl/` ~ `1.2G`
+  - `Backends/sources/protection/FALCO_upstream/figs/` ~ `24M`
+
+Facial Attributes Obfuscation
+- Live path:
+  - `Models/protection/facial_attributes_obfuscation/wrapper.py`
+  - stage1: `python -m utils.score`
+  - generator path: `Generator/main.py`
+- Keep:
+  - `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/utils/`
+  - `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/Generator/`
+  - `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/images/`
+  - pretrained assets under `Backends/assets/protection/facial_attributes_obfuscation/pretrained/`
+- Safe now:
+  - `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/Test-Verification/`
+  - `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/figure/`
+  - `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/align_arc/`
+  - `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/align_vgg/`
+  - `Backends/assets/protection/facial_attributes_obfuscation/pretrained/.cache/`
+- Conditional:
+  - `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/mtcnn/`
+  - `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/interpretability/`
+  - `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/stage1.sh`
+- Why:
+  - stage1 wrapper scores the shipped `images/label.txt`; the listed safe items are examples / figures / verification helpers rather than live wrapper dependencies
+
+UniDefense
+- Live path:
+  - `Models/protection/unidefense/wrapper.py`
+  - runs `Backends/sources/protection/UniDefense_upstream/main.py`
+  - note history verified FE route with local smoke config files outside source tree
+- Keep:
+  - `Backends/sources/protection/UniDefense_upstream/main.py`
+  - `engine/`
+  - `model/`
+  - `dataset/`
+  - `utils/`
+- Conditional:
+  - `Backends/sources/protection/UniDefense_upstream/config_template/`
+  - `loss/`
+  - `optimizer/`
+  - `scheduler/`
+- Why:
+  - templates are examples; deeper training-time modules are likely unnecessary for inference, but keep conditional unless we verify imports through all engines
+
+M2F2-Det
+- Live path:
+  - `Models/protection/m2f2_det/wrapper.py`
+  - stage1 python entry: `stage_1_detection_inference.py`
+  - stage3 shell entries: `stage_3_inference_det.sh`, `stage_3_inference_exp.sh`
+  - env points to:
+    - `Backends/assets/protection/m2f2_det/torch_home`
+    - `Backends/assets/protection/m2f2_det/huggingface/openai--clip-vit-large-patch14-336`
+    - `Backends/assets/protection/m2f2_det/checkpoints/`
+- Keep:
+  - `Backends/sources/protection/M2F2_Det_upstream/stage_1_detection_inference.py`
+  - `Backends/sources/protection/M2F2_Det_upstream/stage_3_inference_det.sh`
+  - `Backends/sources/protection/M2F2_Det_upstream/stage_3_inference_exp.sh`
+  - `dataset/`
+  - `sequence/`
+  - `llava/`
+  - active checkpoint / huggingface trees under assets
+- Safe now:
+  - `Backends/assets/protection/m2f2_det/checkpoints/llava-v1.5-7b-M2F2-Det/.cache/`
+  - `Backends/assets/protection/m2f2_det/huggingface/openai--clip-vit-large-patch14-336/.cache/`
+  - `Backends/sources/protection/M2F2_Det_upstream/asset/teaser.png`
+  - `Backends/sources/protection/M2F2_Det_upstream/utils/DDVQA_images/c40/test/`
+  - `Backends/sources/protection/M2F2_Det_upstream/utils/DDVQA_images/c23.zip`
+  - `Backends/sources/protection/M2F2_Det_upstream/utils/DDVQA_images/c40.zip`
+- Conditional:
+  - `Backends/sources/protection/M2F2_Det_upstream/eval/`
+  - `Backends/sources/protection/M2F2_Det_upstream/scripts/`
+  - `Backends/sources/protection/M2F2_Det_upstream/stage_1_train.sh`
+  - `Backends/sources/protection/M2F2_Det_upstream/stage_2_train.sh`
+  - `Backends/sources/protection/M2F2_Det_upstream/stage_3_train.sh`
+  - `Backends/sources/protection/M2F2_Det_upstream/stage_1_detection.py`
+  - `Backends/sources/protection/M2F2_Det_upstream/stage_1_inference.sh`
+  - `Backends/sources/protection/M2F2_Det_upstream/llava/serve/test_message.py`
+- Size notes:
+  - main `.cache` under LLaVA checkpoint tree ~ `3.2G`
+
+Summary: highest-confidence deletions across all backends
+=========================================================
+- `Backends/sources/AdaFace_upstream/__pycache__/`
+- `Backends/sources/AdaFace_upstream/assets/`
+- `Backends/sources/AdaFace_upstream/face_alignment/`
+- `Backends/sources/MagFace_upstream/models/__pycache__/`
+- `Backends/sources/MagFace_upstream/inference/examples.ipynb`
+- `Backends/sources/MagFace_upstream/inference/toy_imgs/`
+- `Backends/sources/MagFace_upstream/raw/`
+- `Backends/assets/recognition/insightface/models/antelopev2.zip`
+- `Backends/assets/recognition/insightface/models/buffalo_l/`
+- `Backends/assets/recognition/insightface/models/buffalo_l.zip`
+- `Backends/sources/attack/DiM_native_upstream/.git/`
+- `Backends/sources/attack/DiM_native_upstream/docs/assets/`
+- `Backends/assets/attack/advfacegan/ckpts.zip`
+- `Backends/sources/attack/AdvFaceGAN_upstream/fr_models/test/`
+- `Backends/sources/attack/AdvFaceGAN_upstream/picture/`
+- all AdvFaceGAN experiment notebooks
+- `Backends/sources/attack/FOMM_upstream/demo.ipynb`
+- `Backends/sources/attack/FOMM_upstream/demo_jupyter.ipynb`
+- `Backends/sources/attack/FOMM_upstream/old_demo.ipynb`
+- `Backends/sources/attack/FOMM_upstream/sup-mat/`
+- `Backends/sources/attack/SimSwap_upstream/MultiSpecific.ipynb`
+- `Backends/sources/attack/SimSwap_upstream/SimSwap colab.ipynb`
+- `Backends/sources/attack/SimSwap_upstream/train.ipynb`
+- `Backends/sources/attack/SimSwap_upstream/docs/`
+- REFace safe-now bucket from note 44
+- MorDIFF / DiffAE safe-now bucket from note 44
+- `Backends/sources/dependencies/taming-transformers/assets/`
+- `Backends/sources/dependencies/taming-transformers/scripts/reconstruction_usage.ipynb`
+- `Backends/sources/dependencies/taming-transformers/scripts/taming-transformers.ipynb`
+- `Backends/sources/protection/FaceShield_upstream/assets/`
+- `Backends/sources/protection/FaceShield_upstream/data/test/`
+- `Backends/sources/protection/FALCO_upstream/figs/`
+- `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/Test-Verification/`
+- `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/figure/`
+- `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/align_arc/`
+- `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/align_vgg/`
+- `Backends/assets/protection/m2f2_det/checkpoints/llava-v1.5-7b-M2F2-Det/.cache/`
+- `Backends/assets/protection/m2f2_det/huggingface/openai--clip-vit-large-patch14-336/.cache/`
+- `Backends/sources/protection/M2F2_Det_upstream/asset/teaser.png`
+- `Backends/sources/protection/M2F2_Det_upstream/utils/DDVQA_images/c40/test/`
+- `Backends/sources/protection/M2F2_Det_upstream/utils/DDVQA_images/c23.zip`
+- `Backends/sources/protection/M2F2_Det_upstream/utils/DDVQA_images/c40.zip`
+
+Recommended next step
+- Convert this note into a concrete deletion script in three passes:
+  - pass 1: `safe now`
+  - pass 2: active-backend conditional trims we explicitly approve
+  - pass 3: provenance-only backends like `mipgan` and native `dim`
+
+Execution log: safe-now deletion set approved on 2026-04-08
+===========================================================
+- `Backends/sources/AdaFace_upstream/__pycache__/`
+- `Backends/sources/AdaFace_upstream/assets/`
+- `Backends/sources/AdaFace_upstream/face_alignment/`
+- `Backends/sources/MagFace_upstream/models/__pycache__/`
+- `Backends/sources/MagFace_upstream/inference/examples.ipynb`
+- `Backends/sources/MagFace_upstream/inference/toy_imgs/`
+- `Backends/sources/MagFace_upstream/raw/`
+- `Backends/assets/recognition/insightface/models/antelopev2.zip`
+- `Backends/assets/recognition/insightface/models/buffalo_l/`
+- `Backends/assets/recognition/insightface/models/buffalo_l.zip`
+- `Backends/sources/attack/DiM_native_upstream/.git/`
+- `Backends/sources/attack/DiM_native_upstream/docs/assets/`
+- `Backends/assets/attack/advfacegan/ckpts.zip`
+- `Backends/sources/attack/AdvFaceGAN_upstream/fr_models/test/`
+- `Backends/sources/attack/AdvFaceGAN_upstream/picture/`
+- `Backends/sources/attack/AdvFaceGAN_upstream/1_prepDataset.ipynb`
+- `Backends/sources/attack/AdvFaceGAN_upstream/2_eval_fr.ipynb`
+- `Backends/sources/attack/AdvFaceGAN_upstream/3_eval_aliyun.ipynb`
+- `Backends/sources/attack/AdvFaceGAN_upstream/4_eval_tencent.ipynb`
+- `Backends/sources/attack/AdvFaceGAN_upstream/5_eval_faceplusplus.ipynb`
+- `Backends/sources/attack/AdvFaceGAN_upstream/6_hyperparam_experiment.ipynb`
+- `Backends/sources/attack/AdvFaceGAN_upstream/7_compare_experiment.ipynb`
+- `Backends/sources/attack/AdvFaceGAN_upstream/8_face++_api_experiment.ipynb`
+- `Backends/sources/attack/AdvFaceGAN_upstream/9_tencent_api_experiment.ipynb`
+- `Backends/sources/attack/AdvFaceGAN_upstream/10_aliyun_api_experiment.ipynb`
+- `Backends/sources/attack/FOMM_upstream/demo.ipynb`
+- `Backends/sources/attack/FOMM_upstream/demo_jupyter.ipynb`
+- `Backends/sources/attack/FOMM_upstream/old_demo.ipynb`
+- `Backends/sources/attack/FOMM_upstream/sup-mat/`
+- `Backends/sources/attack/SimSwap_upstream/MultiSpecific.ipynb`
+- `Backends/sources/attack/SimSwap_upstream/SimSwap colab.ipynb`
+- `Backends/sources/attack/SimSwap_upstream/train.ipynb`
+- `Backends/sources/attack/SimSwap_upstream/docs/`
+- `Backends/assets/attack/reface/support/hf_cache/models--openai--clip-vit-large-patch14/.cache/`
+- `Backends/assets/attack/reface/support/hf_home/`
+- `Backends/assets/attack/reface/support/hf_cache/models--openai--clip-vit-large-patch14/flax_model.msgpack`
+- `Backends/assets/attack/reface/support/hf_cache/models--openai--clip-vit-large-patch14/tf_model.h5`
+- `Backends/sources/attack/REFace_upstream/eval_tool/`
+- `Backends/sources/dependencies/diffae/.git/`
+- `Backends/sources/dependencies/diffae/.vscode/`
+- `Backends/sources/dependencies/diffae/__pycache__/`
+- `Backends/sources/dependencies/diffae/README.md.backup`
+- `Backends/sources/dependencies/diffae/autoencoding.ipynb`
+- `Backends/sources/dependencies/diffae/interpolate.ipynb`
+- `Backends/sources/dependencies/diffae/manipulate.ipynb`
+- `Backends/sources/dependencies/diffae/manipulate_note.ipynb`
+- `Backends/sources/dependencies/diffae/sample.ipynb`
+- `Backends/sources/dependencies/diffae/imgs/`
+- `Backends/sources/dependencies/diffae/imgs_align/`
+- `Backends/sources/dependencies/diffae/imgs_interpolate/`
+- `Backends/sources/dependencies/diffae/imgs_manipulated/`
+- `Backends/sources/dependencies/diffae/run_bedroom128.py`
+- `Backends/sources/dependencies/diffae/run_bedroom128_ddim.py`
+- `Backends/sources/dependencies/diffae/run_celeba64.py`
+- `Backends/sources/dependencies/diffae/run_ffhq128.py`
+- `Backends/sources/dependencies/diffae/run_ffhq128_cls.py`
+- `Backends/sources/dependencies/diffae/run_ffhq128_ddim.py`
+- `Backends/sources/dependencies/diffae/run_ffhq256.py`
+- `Backends/sources/dependencies/diffae/run_ffhq256.sh`
+- `Backends/sources/dependencies/diffae/run_ffhq256_cls.py`
+- `Backends/sources/dependencies/diffae/run_ffhq256_latent.py`
+- `Backends/sources/dependencies/diffae/run_horse128.py`
+- `Backends/sources/dependencies/diffae/run_horse128_ddim.py`
+- `Backends/sources/dependencies/diffae/predict.py`
+- `Backends/sources/dependencies/diffae/experiment_classifier.py`
+- `Backends/sources/dependencies/diffae/templates_cls.py`
+- `Backends/sources/dependencies/diffae/evals/`
+- `Backends/sources/dependencies/taming-transformers/assets/`
+- `Backends/sources/dependencies/taming-transformers/scripts/reconstruction_usage.ipynb`
+- `Backends/sources/dependencies/taming-transformers/scripts/taming-transformers.ipynb`
+- `Backends/sources/protection/FaceShield_upstream/assets/`
+- `Backends/sources/protection/FaceShield_upstream/data/test/`
+- `Backends/sources/protection/FALCO_upstream/figs/`
+- `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/Test-Verification/`
+- `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/figure/`
+- `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/align_arc/`
+- `Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/align_vgg/`
+- `Backends/assets/protection/m2f2_det/checkpoints/llava-v1.5-7b-M2F2-Det/.cache/`
+- `Backends/assets/protection/m2f2_det/huggingface/openai--clip-vit-large-patch14-336/.cache/`
+- `Backends/sources/protection/M2F2_Det_upstream/asset/teaser.png`
+- `Backends/sources/protection/M2F2_Det_upstream/utils/DDVQA_images/c40/test/`
+- `Backends/sources/protection/M2F2_Det_upstream/utils/DDVQA_images/c23.zip`
+- `Backends/sources/protection/M2F2_Det_upstream/utils/DDVQA_images/c40.zip`

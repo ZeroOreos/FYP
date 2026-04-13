@@ -1,0 +1,204 @@
+Workspace fat candidates outside backend source / asset trims
+Date: 2026-04-08
+
+Scope
+- This note looks for excess bulk outside the already-trimmed `Backends/sources/**` and `Backends/assets/**` safe bucket.
+- Focus areas:
+  - `tmp/`
+  - `Results/`
+  - `Backends/workdirs/`
+  - leftover caches / checkpoints / generated artifacts
+
+Top-level snapshot
+- `Backends/assets` ~ `36G`
+- `Backends/sources` ~ `4.3G`
+- `Models/InsightFace` ~ `372M`
+- `Models/FaceNet` ~ `368M`
+- `tmp/fao_stage2_smoke` ~ `266M`
+- `tmp/fao_stage2_smoke_no_random` ~ `203M`
+- `Results/train` ~ `28M`
+- `Results/val` ~ `7.3M`
+
+Strong candidates outside backend trees
+======================================
+
+tmp/
+- Highest-confidence disposable smoke artifacts:
+  - `tmp/fao_stage2_smoke/`
+  - `tmp/fao_stage2_smoke_no_random/`
+  - `tmp/m2f2_smoke_ffpp_h5/`
+  - `tmp/m2f2_smoke_ffpp_distinct/`
+  - `tmp/deepprivacy2_mps_in/`
+  - `tmp/fao_stage2_test/`
+  - `tmp/fao_stage2_test_no_random/`
+  - `tmp/unidefense_smoke_ffpp/`
+  - `tmp/fao_arc_mode/`
+  - `tmp/falco_smoke_celebahq/`
+  - one-off logs and JSON summaries in `tmp/*.log` and `tmp/*.json`
+- Why:
+  - names indicate smoke runs, throwaway test fixtures, and generated validation outputs rather than canonical assets
+- Notable heavy files:
+  - `tmp/fao_stage2_smoke/out2/models/1-D.ckpt` ~ `171M`
+  - `tmp/fao_stage2_smoke_no_random/models/1-D.ckpt` ~ `171M`
+  - `tmp/fao_stage2_smoke/out2/models/1-G.ckpt` ~ `32M`
+  - `tmp/fao_stage2_smoke_no_random/models/1-G.ckpt` ~ `32M`
+- Structural note:
+  - `tmp/fao_stage2_smoke/` includes about `63M` of copied fixture images plus the model checkpoints above
+
+Results/
+- Low-risk cleanup candidates if old experiment outputs are no longer needed:
+  - `Results/train/FaceNet/`
+  - `Results/train/InsightFace/`
+  - `Results/val/FaceNet/`
+  - `Results/val/InsightFace/`
+  - stray metadata:
+    - `Results/.DS_Store`
+    - `Results/train/.DS_Store`
+- Why:
+  - these are generated outputs, not source-of-record code
+- Size notes:
+  - `Results/train/FaceNet/` ~ `14M`
+  - `Results/train/InsightFace/` ~ `14M`
+  - `Results/val/FaceNet/` ~ `3.6M`
+  - `Results/val/InsightFace/` ~ `3.6M`
+
+Models/
+- `Models/FaceNet/` and `Models/InsightFace/` are both unusually large for code trees.
+- Likely cause:
+  - local support / vendored runtime material under model directories, not just scripts
+- Needs a second pass before deletion:
+  - these are active model trees, so anything here should be audited file-by-file first
+
+Backends/workdirs/
+- This is the most likely next major fat source after backend assets.
+- Current evidence:
+  - many backend methods have dedicated workdirs
+  - workdirs likely contain local virtualenvs, package caches, matplotlib caches, and run outputs
+- Observed subtrees:
+  - `Backends/workdirs/attack/{advfacegan,dim,fomm,mipgan,mordiff,reface,simswap}`
+  - `Backends/workdirs/protection/{deepprivacy2,faceshield,facial_attributes_obfuscation,falco,fawkes,m2f2_det,unidefense}`
+  - `Backends/workdirs/recognition/{adaface,facenet,insightface,magface}`
+- Safe-to-investigate classes inside workdirs:
+  - virtual environments: `venv`, `.venv`, `venv_mps`, `venv_cpu`, `venv_cuda`
+  - `__pycache__/`
+  - `.cache/`
+  - `matplotlib/`
+  - run-output dirs like `outputs/`, `results/`, `samples/`, `logs/`, `stage1-det/`
+- Confirmed minor cache examples:
+  - `Backends/workdirs/protection/deepprivacy2/outputs/` is empty
+  - matplotlib caches under workdirs are tiny (`~144K` scale)
+- Conclusion:
+  - the real likely savings here are virtualenvs, not matplotlib caches
+
+Other small fat / clutter
+=========================
+
+.DS_Store
+- Seen in:
+  - `Results/.DS_Store`
+  - `Results/train/.DS_Store`
+- Tiny, but safe to delete
+
+Notebook / media leftovers
+- Some may still exist outside the backend trees already trimmed
+- worth auditing later under:
+  - `notes/`
+  - `Models/`
+  - `Backends/workdirs/` site-packages test content if we decide to shrink or remove local virtualenvs
+
+Priority ranking
+================
+
+Highest value, lowest risk
+- `tmp/fao_stage2_smoke/`
+- `tmp/fao_stage2_smoke_no_random/`
+- remaining smoke fixtures under `tmp/`
+- `.DS_Store` files in `Results/`
+
+High value, medium risk
+- `Results/train/**`
+- `Results/val/**`
+- unused local virtualenvs under `Backends/workdirs/**`
+
+Needs targeted audit first
+- `Models/FaceNet/`
+- `Models/InsightFace/`
+- active workdirs that may still be used as the canonical local runtime envs
+
+Recommended next step
+- Audit `Backends/workdirs/**` and `Models/{FaceNet,InsightFace}/**` file-by-file.
+- If the goal is space first, the fastest safe win is deleting old smoke fixtures under `tmp/`.
+
+Execution decision on 2026-04-08
+================================
+
+Approved for deletion now
+- `tmp/fao_stage2_smoke/`
+- `tmp/fao_stage2_smoke_no_random/`
+- `tmp/m2f2_smoke_ffpp_h5/`
+- `tmp/m2f2_smoke_ffpp_distinct/`
+- `tmp/deepprivacy2_mps_in/`
+- `tmp/deepprivacy2_mps_out/`
+- `tmp/deepprivacy2_mps_out_small/`
+- `tmp/deepprivacy2_mps_out_small2/`
+- `tmp/deepprivacy2_mps_out_small3/`
+- `tmp/fao_stage2_test/`
+- `tmp/fao_stage2_test_no_random/`
+- `tmp/unidefense_smoke_ffpp/`
+- `tmp/fao_arc_mode/`
+- `tmp/falco_smoke_celebahq/`
+- `tmp/fawkes_smoke_in/`
+- `tmp/fawkes_smoke_out/`
+- `tmp/protection_smoke/`
+- `tmp/unidefense_smoke_configs/`
+- log / summary artifacts in `tmp/`:
+  - `tmp/falco_anonymize_mps.log`
+  - `tmp/falco_create_fake_mps.log`
+  - `tmp/falco_extract_mps.log`
+  - `tmp/falco_extract_mps_summary.json`
+  - `tmp/falco_invert_mps.log`
+  - `tmp/falco_pair_nn.log`
+  - `tmp/falco_pipeline_mps_summary.json`
+  - `tmp/fao_stage1_mps_summary.json`
+  - `tmp/fao_stage2_mps_train.log`
+  - `tmp/fao_stage2_mps_train_save.log`
+  - `tmp/fao_stage1_mps.log`
+  - `tmp/fao_stage2_mps_test.log`
+  - `tmp/unidefense_smoke_summary.json`
+- generated result trees:
+  - `Results/train/`
+  - `Results/val/`
+  - `Results/main/`
+  - `Results/.DS_Store`
+  - `Results/train/.DS_Store`
+- workdir cache / output dirs:
+  - `Backends/workdirs/protection/deepprivacy2/outputs/`
+  - `Backends/workdirs/protection/facial_attributes_obfuscation/matplotlib/`
+  - `Backends/workdirs/protection/falco/matplotlib/`
+  - `Backends/workdirs/protection/unidefense/matplotlib/`
+  - `Backends/workdirs/recognition/facenet/matplotlib/`
+  - `Backends/workdirs/recognition/insightface/matplotlib/`
+
+Investigated but retained for now
+- All `Backends/workdirs/**/venv*` directories
+- Why retained:
+  - these are the dominant workdir bulk and appear to be the runnable local environments
+  - deleting them would save substantial space but would also remove the current local execution envs
+- Measured sizes:
+  - `Backends/workdirs/recognition/facenet/venv` ~ `521M`
+  - `Backends/workdirs/attack/advfacegan/venv_mps` ~ `527M`
+  - `Backends/workdirs/recognition/adaface/venv` ~ `629M`
+  - `Backends/workdirs/attack/mordiff/venv_cpu` ~ `677M`
+  - `Backends/workdirs/recognition/insightface/venv` ~ `714M`
+  - `Backends/workdirs/recognition/magface/venv` ~ `717M`
+  - `Backends/workdirs/attack/mordiff/venv_mps` ~ `891M`
+  - `Backends/workdirs/protection/falco/venv` ~ `966M`
+  - `Backends/workdirs/attack/fomm/venv_mps` ~ `971M`
+  - `Backends/workdirs/protection/facial_attributes_obfuscation/venv` ~ `1.0G`
+  - `Backends/workdirs/protection/m2f2_det/venv` ~ `1.1G`
+  - `Backends/workdirs/protection/unidefense/venv` ~ `1.1G`
+  - `Backends/workdirs/attack/simswap/venv_mps` ~ `1.2G`
+  - `Backends/workdirs/protection/deepprivacy2/venv` ~ `1.2G`
+  - `Backends/workdirs/attack/reface/venv_mps` ~ `1.3G`
+  - `Backends/workdirs/protection/faceshield/venv` ~ `1.3G`
+  - `Backends/workdirs/protection/fawkes/venv` ~ `1.4G`

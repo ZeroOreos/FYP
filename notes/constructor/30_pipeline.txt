@@ -28,16 +28,29 @@ Attack pipeline
 - Every stage should skip when its target already exists and is still valid
 
 Defensive evaluation pipeline target
-- Input: manipulated probes plus prevention / detection method configuration
-- Planned flow:
+- Input: manipulated probes or clean source images plus defense-layer-specific configuration
+- Planned flow by defense layer:
+- proactive privacy / cloaking:
+- clean source image
+- cloaking or privacy-preserving transform
+- downstream attack or verification impact measurement
+- recognizer-side hardening:
 - manipulated probe set from the attack pipeline
-- defensive transform or predictor execution
-- defended-probe or local-deployment-ready model output materialization
-- post-defense verification metrics and deployment-oriented metrics such as runtime, memory, and portability
+- defended recognizer or robust verification execution
+- post-defense verification metrics plus deployment-oriented metrics
+- post-hoc detection:
+- manipulated probe set from the attack pipeline
+- detector execution
+- detection metrics plus deployment-oriented metrics
+- shared reporting outputs:
 - compiled results
 - parsed tables
 - Current repo status: this phase was always part of the intended project plan, but it is not yet the main implemented path
 - The current attack pipeline should be treated as the required benchmark-construction stage for this defensive phase rather than as a separate late-added direction
+- WIFS reporting rule:
+- the paper should center this defensive phase, with the attack pipeline described as the common benchmark substrate
+- the same manipulated-probe subset should drive defense comparisons wherever possible so layer-to-layer claims stay fair
+- deployment-oriented measurements should be collected beside security measurements rather than postponed to discussion only
 
 Pairing
 - `Attack/pairs.py` input: embeddings file or model result directory
@@ -47,5 +60,9 @@ Pairing
 
 Evaluation interpretation
 - Attack-verification metrics are the current operational benchmark because they are needed before later defense evaluation can be meaningful
-- Once prevention / detection methods are added, the same manipulated-probe sets should be reused so attack-side and defense-side results stay comparable
+- Once defense methods are added, the same manipulated-probe sets should be reused for recognizer-hardening and post-hoc detection paths so attack-side and defense-side results stay comparable
+- Proactive cloaking methods should be evaluated slightly differently because they intervene before attack generation rather than only after manipulated probes already exist
 - Local deployment evaluation should track whether defense models remain effective after shrinking, porting, or adapting them to practical runtimes such as MPS-friendly stacks
+- Paper-claim rule:
+- do not headline pooled attack success alone
+- headline the joint security-forensics result: attack impact, defense effectiveness, and practical local deployability

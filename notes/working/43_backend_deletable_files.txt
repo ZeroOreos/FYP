@@ -1,0 +1,175 @@
+# Backend Deletable Files
+
+Purpose
+- Build a delete-candidate list focused on files untouched by the active recognition and attack pipelines.
+- Bias toward manual testers, sample media, duplicate archives, and non-working or redundant checkpoints.
+
+Decision rule
+- `Safe now`: not used by the active top-level pipeline and not needed by the current verified backend path.
+- `Conditional`: not used by the active top-level pipeline, but still tied to backend verification, provenance, or optional standalone wrapper use.
+- `Keep`: currently touched by the active pipeline or by the currently verified native backend path.
+
+Safe now
+
+Manual testing / benchmark files
+- Delete:
+- `Models/Arcface/testing/`
+- `Models/FaceNet/testing/`
+- `Models/InsightFace/testing/`
+- Why:
+- none of these trees are referenced by `main_recognition.py`, `main_attack.py`, `Utility/runtime.py`, or the active attack wrappers
+- they are legacy manual test and benchmark helpers
+- Extra note:
+- `Models/FaceNet/testing/facenet_embeddings.npz`
+- `Models/InsightFace/testing/main_antelopev2_embeddings.npz`
+- `Models/InsightFace/testing/verification_pairs.npz`
+- are generated/manual artifacts inside those testing trees, not pipeline outputs
+
+Unused duplicate InsightFace pack
+- Delete:
+- `Backends/assets/recognition/insightface/models/buffalo_l/`
+- `Backends/assets/recognition/insightface/models/buffalo_l.zip`
+- Why:
+- active recognition path uses `antelopev2`, not `buffalo_l`
+- the only local references to `buffalo_l` are inside `Models/InsightFace/testing/`, which is already outside the active pipeline
+- Estimated space:
+- about `325M` for the unpacked folder
+- about `275M` for the zip
+
+Unused packed archive duplicate
+- Delete:
+- `Backends/assets/recognition/insightface/models/antelopev2.zip`
+- Why:
+- the unpacked `antelopev2/` directory is what the active pipeline uses
+- the zip archive is not referenced by runtime code
+- Estimated space:
+- about `344M`
+
+Broken / unused AdvFaceGAN checkpoint archive
+- Delete:
+- `Backends/assets/attack/advfacegan/ckpts.zip`
+- Why:
+- working path uses `Backends/sources/attack/AdvFaceGAN_upstream/defense/00940_generator.pth`
+- working notes explicitly say `ckpts.zip` is corrupt or incomplete and not needed for verification
+- Estimated space:
+- about `588M`
+
+Pure documentation / teaser media
+- Delete:
+- `Backends/sources/AdaFace_upstream/assets/adaface_demo5.gif`
+- `Backends/sources/AdaFace_upstream/assets/main_figure.png`
+- `Backends/sources/AdaFace_upstream/assets/ms1mv2_train_subset_index.txt`
+- `Backends/sources/AdaFace_upstream/assets/video_thumbnail.png`
+- `Backends/sources/protection/FaceShield_upstream/assets/Poster.png`
+- `Backends/sources/protection/FaceShield_upstream/assets/intro.png`
+- `Backends/sources/protection/FaceShield_upstream/assets/pipeline.png`
+- `Backends/sources/protection/FaceShield_upstream/assets/teaser.png`
+- `Backends/sources/dependencies/taming-transformers/assets/`
+- Why:
+- none of these are referenced by current wrappers or runtime code
+- they are documentation, teaser, or example media only
+- Estimated space:
+- AdaFace assets about `25M`
+- FaceShield assets about `7.4M`
+- taming-transformers assets about `8.9M`
+
+Conditional
+
+MorDIFF sample and verification media
+- Delete if we no longer care about local MorDIFF smoke-example reproducibility:
+- `Backends/sources/attack/MorDIFF_upstream/test/`
+- Why:
+- active wrapper uses `morph_two_images.py` plus DiffAE checkpoints, not this sample folder directly
+- however the working notes repeatedly use `Backends/sources/attack/MorDIFF_upstream/test/aligned/*.png` for smoke verification commands
+- Estimated space:
+- about `1.4M`
+
+FaceShield test image
+- Delete if we do not need upstream sample input for blocked backend experiments:
+- `Backends/sources/protection/FaceShield_upstream/data/test/`
+- Why:
+- not used by the wrapper defaults
+- useful only as sample data for manual experimentation
+- Estimated space:
+- about `568K`
+
+M2F2 upstream sample test set
+- Delete if we do not need preserved upstream sample-image fixtures:
+- `Backends/sources/protection/M2F2_Det_upstream/utils/DDVQA_images/c40/test/`
+- Why:
+- current verified wrapper path uses explicit smoke fixtures via `--data-root` and `--test-split`, not this bundled sample set
+- this looks like upstream example data, not active pipeline input
+- Estimated space:
+- about `1.1M`
+
+MIPGAN public-portal provenance files
+- Delete only if we are dropping MIPGAN provenance entirely:
+- `Backends/sources/attack/MIPGAN_upstream/README.md`
+- `Backends/sources/attack/MIPGAN_upstream/MIPGAN-license-240916.pdf`
+- Why:
+- current runnable path is fallback-only and does not need these files
+- but these two files are the whole provenance record for the imported public portal snapshot
+
+FaceShield backend assets
+- Delete only if we are dropping FaceShield completely:
+- `Backends/assets/protection/faceshield/models/arcface50_checkpoint.tar`
+- `Backends/assets/protection/faceshield/models/arcface100_checkpoint.tar`
+- Why:
+- FaceShield is blocked on this machine and not part of the active pipeline
+- but these files are still the explicit checkpoint inputs for the standalone wrapper
+
+Keep
+
+Recognition pipeline assets
+- Keep:
+- `Backends/assets/recognition/insightface/models/antelopev2/`
+- `Backends/assets/recognition/facenet/torch/checkpoints/20180402-114759-vggface2.pt`
+- `Backends/assets/recognition/adaface/pretrained/adaface_ir50_ms1mv2.ckpt`
+- `Backends/assets/recognition/magface/pretrained/magface_iresnet100_ms1mv2.pth`
+- Why:
+- all are on the active recognition path
+
+Verified working attack checkpoints and support caches
+- Keep:
+- `Backends/sources/attack/AdvFaceGAN_upstream/defense/00940_generator.pth`
+- `Backends/assets/attack/fomm/vox-cpk.pth.tar`
+- `Backends/assets/attack/reface/last.ckpt`
+- `Backends/assets/attack/reface/support/`
+- `Backends/sources/dependencies/diffae/checkpoints/ffhq256_autoenc/last.ckpt`
+- `Backends/sources/dependencies/diffae/checkpoints/ffhq256_autoenc/latent.pkl`
+- Why:
+- these belong to currently verified native backend paths
+
+Protection checkpoints that still define the standalone wrappers
+- Keep unless we explicitly drop that backend:
+- `Backends/assets/protection/deepprivacy2/torch_home/hub/checkpoints/WIDERFace_DSFD_RES152.pth`
+- `Backends/assets/protection/facial_attributes_obfuscation/pretrained/*`
+- `Backends/assets/protection/falco/models/pretrained/*`
+- `Backends/assets/protection/unidefense/ckpt/*`
+- `Backends/assets/protection/m2f2_det/checkpoints/stage_1/current_model_180.pth`
+- `Backends/assets/protection/m2f2_det/huggingface/openai--clip-vit-large-patch14-336/*`
+- `Backends/assets/protection/m2f2_det/torch_home/hub/checkpoints/efficientnet_b4_rwightman-23ab8bcd.pth`
+- `Backends/assets/protection/m2f2_det/utils/weights/vision_tower.pth`
+- Why:
+- these remain part of the current standalone verified or bootstrapped wrapper paths
+
+Suggested deletion order
+- 1. `Models/Arcface/testing/`
+- 2. `Models/FaceNet/testing/`
+- 3. `Models/InsightFace/testing/`
+- 4. `Backends/assets/attack/advfacegan/ckpts.zip`
+- 5. `Backends/assets/recognition/insightface/models/buffalo_l/`
+- 6. `Backends/assets/recognition/insightface/models/buffalo_l.zip`
+- 7. `Backends/assets/recognition/insightface/models/antelopev2.zip`
+- 8. pure-doc asset folders under vendored sources
+
+Estimated easy savings from the `Safe now` bucket
+- testing trees: about `740M`
+- AdvFaceGAN broken zip: about `588M`
+- InsightFace duplicate packs and zip: about `944M`
+- doc / teaser assets: about `41M`
+- total: roughly `2.3G`
+
+Notes
+- This list intentionally excludes venv contents. Those are much larger, but deleting them changes runtime capability, not just backend clutter.
+- This list also excludes currently active checkpoints even if they are large.

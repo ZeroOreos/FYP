@@ -6,8 +6,8 @@ Current status:
 
 - The canonical pipeline entrypoint is `generate.py`.
 - The implementation logic lives in `wrapper.py`.
-- Imported native source location is `Backends/sources/DiM_native_upstream/`.
-- Expected backend assets location is `Backends/assets/dim/`.
+- Imported native source location is `Backends/sources/attack/DiM_native_upstream/`.
+- Expected backend assets location is `Backends/assets/attack/dim/`.
 
 Important fidelity note:
 

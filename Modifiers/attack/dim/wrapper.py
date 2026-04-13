@@ -61,7 +61,7 @@ def main() -> None:
         extra_summary={
             "backend_type": "local_approximation",
             "fidelity_note": "Local DiM-style morph approximation for smoke tests and pipeline integration.",
-            "native_repo": "Backends/sources/DiM_native_upstream",
+            "native_repo": "Backends/sources/attack/DiM_native_upstream",
             "native_release_gate": "run_dim.py is still encrypted upstream and requires the CITeR passphrase-release process",
         },
     )

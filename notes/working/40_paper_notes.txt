@@ -1,21 +1,34 @@
 # Paper Notes
 
+WIFS direction
+- Target venue framing: information forensics and security, not a pure attack-benchmark venue
+- Keep the paper centered on a forensics / security claim:
+- manipulated-face attacks can mislead verification systems
+- layered defenses differ in what they prevent, what they detect, and what remains practical to deploy locally
+- attack benchmarking is necessary infrastructure, but it should not be the whole headline contribution
+- current honest fit status:
+- on-topic for biometrics, deep learning for forensics, and privacy / anonymity
+- not yet paper-centered enough if the evaluated story stops at attack success rate alone
+- strongest narrative path is a layered-defense study using a shared manipulated-probe benchmark and explicit deployment constraints
+
 Current working shortlist
 - Family-complete target set is `simswap`, `reface`, `advfacegan`, `fomm`, `dim`, and `mordiff`; treat `mipgan` as optional enrichment rather than an active build priority
 - Keep `fomm` analytically separate as reenactment rather than mixing it directly into swap or morph conclusions
-- Prevention / detection evaluation with locally deployable defense models was always part of the intended FYP plan; the current repo state reflects attack-benchmark construction being implemented first
+- Layered defense evaluation with locally deployable models was always part of the intended FYP plan; the current repo state reflects attack-benchmark construction being implemented first
+- paper-scope rule: prefer a smaller verified set that supports one sharp claim over a larger partially faithful set
 
 Recognition-model interpretation
-- Current recognizer set is `InsightFace` plus `FaceNet`, which is enough for the current attack-verification phase but still a bit thin for stronger cross-verifier claims
+- Current recognizer set is `InsightFace`, `FaceNet`, `AdaFace`, and `MagFace`
 - `FaceNet`: classic baseline; useful as an older, simpler verifier reference point
 - `InsightFace`: strongest current anchor baseline; effectively an ArcFace-family modern verifier in the current repo
-- planned `AdaFace`: best next recognizer addition because it adapts more explicitly to image-quality variation, which is relevant when attacks introduce blur, artifacts, compression, or other probe degradation
-- planned `MagFace`: useful optional second addition because it makes face quality / embedding reliability more explicit in the recognition model behavior
-- practical recognizer roadmap: keep `InsightFace`, keep `FaceNet`, add `AdaFace`, optionally add `MagFace`
+- `AdaFace`: integrated quality-adaptive modern baseline; checkpoint-backed local generation is now wired and smoke-tested
+- `MagFace`: integrated quality-aware modern baseline; checkpoint-backed local generation is now wired and smoke-tested
+- practical recognizer roadmap: keep the current four-model set unless a later paper need justifies replacing one rather than growing the zoo further
 - avoid growing a large recognizer zoo; the point is to reduce over-dependence on one verifier family, not to make recognizers the whole thesis
 - `FaceNet` may make aggregate evaluation look weaker because it is an older and usually weaker verifier than `InsightFace`; that is analytically useful, but it should not control the whole paper narrative
 - reporting rule: do not collapse `FaceNet` and `InsightFace` into one vague pooled headline; show recognizer-specific results first, then summarize cross-recognizer trends
-- interpretation rule: treat `FaceNet` as a legacy breadth baseline and `InsightFace` as the current modern anchor unless later recognizer additions change that balance
+- interpretation rule: treat `FaceNet` as a legacy breadth baseline, `InsightFace` as the ArcFace-family modern anchor, and `AdaFace` / `MagFace` as quality-aware modern cross-checks rather than separate thesis centers
+- paper-writing rule: recognizers are measurement instruments and robustness cross-checks, not the main novelty axis
 
 Current verified working set as of 2026-03-29
 - Verified working set is `simswap`, `fomm`, `reface`, `advfacegan`, and `mordiff`
@@ -24,12 +37,12 @@ Current verified working set as of 2026-03-29
 - `mipgan` and `dim` now have local smoke-test paths, but those paths should still be described as partial / approximation-grade rather than verified upstream-faithful backends
 - native upstream code is now imported for DiffAE support and for Greedy-DiM / DiM
 - MorDIFF now has the official DiffAE checkpoint locally and a successful checkpoint-backed native CPU smoke test using reduced-step midpoint-only settings
-- MorDIFF also now has a successful native MPS smoke test through `Backends/workdirs/mordiff/venv_mps`, again using reduced-step midpoint-only settings
+- MorDIFF also now has a successful native MPS smoke test through `Backends/workdirs/attack/mordiff/venv_mps`, again using reduced-step midpoint-only settings
 - MorDIFF wrapper-level MPS generation is now also confirmed through `tmp/mordiff_wrapper_mps_out/019_03_demo/001_03.png`
-- FOMM now also has a successful one-pair MPS wrapper smoke test through `Backends/workdirs/fomm/venv_mps`
-- SimSwap now also has a successful one-pair MPS wrapper smoke test through `Backends/workdirs/simswap/venv_mps`
-- REFace now also has a successful one-pair MPS wrapper smoke test through `Backends/workdirs/reface/venv_mps`
-- AdvFaceGAN now also has a successful one-pair MPS wrapper smoke test through `Backends/workdirs/advfacegan/venv_mps`
+- FOMM now also has a successful one-pair MPS wrapper smoke test through `Backends/workdirs/attack/fomm/venv_mps`
+- SimSwap now also has a successful one-pair MPS wrapper smoke test through `Backends/workdirs/attack/simswap/venv_mps`
+- REFace now also has a successful one-pair MPS wrapper smoke test through `Backends/workdirs/attack/reface/venv_mps`
+- AdvFaceGAN now also has a successful one-pair MPS wrapper smoke test through `Backends/workdirs/attack/advfacegan/venv_mps`
 - DiM should currently be described as an engineered recreation that runs locally rather than as a faithful native reproduction
 - further DiM development is not planned unless something materially changes in the upstream release situation
 - `mipgan` should now be treated as a lower-priority optional GAN morph baseline rather than as a current blocker or day's main target
@@ -40,10 +53,65 @@ Current verified working set as of 2026-03-29
 - `simswap`: verified on a one-pair wrapper smoke test
 - `reface`: verified on a one-pair wrapper smoke test
 - `advfacegan`: verified on a one-pair wrapper smoke test
-- todo: add prevention / detection models so the repo can move from attack-benchmark construction into the intended defensive evaluation phase
-- current defense-model shortlist is `UniDefense`, `FaceShield`, `M2F2-Det`, and `RECCE`
-- preferred initial order is `UniDefense` -> `FaceShield` -> `M2F2-Det`, with `RECCE` kept as the simpler fallback if the newer stacks become too heavy or awkward
+- paper-set rule:
+- prefer these five verified attack backends as the core evaluated attack set
+- keep `dim` and `mipgan` as optional appendix or future-work material unless their fidelity story becomes much stronger
+- backend cleanup rule now active: do not carry whole native stacks by default when the local wrapper only needs a small runnable inference slice, and treat large vendored upstream trees as optional environment material unless they are core evaluated methods or needed for strict reproduction
+- first trim pass completed for protection backends: remove generated caches, source-tree smoke outputs, demo notebooks, generated docs/media bundles, and teaser assets while preserving wrapper-called code, minimal provenance files, and required runtime assets
+- defense-layer framing:
+- proactive privacy / cloaking methods act before misuse by perturbing source images or gallery images
+- recognizer-side hardening methods try to make verification itself less vulnerable to manipulated probes
+- post-hoc detection methods inspect manipulated probes or outputs for evidence of forgery
+- current defense candidates by layer:
+- proactive privacy / cloaking shortlist:
+- `Fawkes`: first proactive baseline because it best matches the privacy-cloaking objective of the FYP
+- `FaceShield`: proactive image-protection candidate; keep it with pre-attack defenses rather than detector leaderboards
+- `FALCO`: first strong anonymization candidate because the open-code / open-license story is cleaner than most alternatives
+- `DeepPrivacy2`: official maintained successor to `DeepPrivacy`; use this as the active practical anonymization target
+- legacy `DeepPrivacy`: historical baseline only, because the legacy checkpoint host is currently unavailable
+- `Facial Attributes Obfuscation`: useful later candidate, but lower priority because its code / license signaling should be checked more carefully during integration
+- post-hoc detection shortlist:
+- `UniDefense`: first practical detector baseline
+- `M2F2-Det` stage-1 detector: second detector candidate for a lighter binary-forgery path
+- `M2F2-Det` full Hugging Face model: heavier interpretable detector replacement for the dropped `RECCE` slot
+- current practical test priority by goal:
+- first post-hoc detector to integrate: `UniDefense`
+- second detector: `M2F2-Det` stage-1
+- third detector: `M2F2-Det` full Hugging Face model after one lighter detector path is stable
+- proactive side-study order:
+- `Fawkes` first
+- `FALCO` second
+- `DeepPrivacy2` third as the maintained anonymization successor
+- `Facial Attributes Obfuscation` fourth
+- legacy `DeepPrivacy` stays out of the active queue unless the old checkpoint host becomes usable again
+- `FaceShield` stays preserved as a blocked CUDA-only reference backend rather than an active local-evaluation todo item
+- keep proactive results separate from detector leaderboards because they intervene before attack generation rather than only after manipulated probes already exist
+- paper-construction priority:
+- first reach one paper-stable proactive result and one paper-stable post-hoc detector result on the same manipulated-probe subset
+- only expand the defense roster after that shared evaluation path is stable
+- current local defense verification status as of 2026-04-07:
+- formalized local defense evaluation set for the FYP:
+- evaluated locally now:
+- `Fawkes`: one-image whole-pipeline CPU smoke test now completes locally through the repo wrapper, but this is a modern Python 3.11 / TensorFlow 2.15 compatibility port rather than an untouched TensorFlow 2.4 environment
+- `FALCO`: reduced end-to-end smoke pipeline verified on native MPS
+- `DeepPrivacy2`: reduced one-image face-anonymization smoke path verified on MPS
+- `Facial Attributes Obfuscation`: stage-1 plus stage-2 smoke paths verified; stage 2 is improved beyond full random init because the released ResNet-style SENet weights now partially translate into the vendored SENet, but it is still approximation-grade rather than benchmark-faithful
+- `UniDefense`: native MPS detector smoke path verified, but only as a runtime-validity proof because it still uses `--allow-random-init`
+- `M2F2-Det` stage-1: strict small-fixture smoke paths now run end to end on CPU and on MPS with the released checkpoint after matching the upstream checkpoint-registration quirk
+- retained but not in the active evaluated set:
+- `FaceShield`: released upstream attack path is CUDA-only and should stay blocked under the fidelity-first policy on this machine
+- deferred / historical:
+- legacy `DeepPrivacy`: historical baseline only unless the old checkpoint host becomes usable again
+- `M2F2-Det` full Hugging Face model: deferred until the lighter stage-1 path is no longer the bottleneck
+- interpretation rule for the defense section:
+- distinguish benchmark-faithful verification from runtime-validity smoke proofs
+- do not describe `Fawkes`, `FaceShield`, and `M2F2-Det` as equally faithful local reproductions just because each now has a clearer runtime story
+- `M2F2-Det` stage-1 is stronger than a random-init smoke proof because it now restores the released checkpoint strictly, but it is still only verified on a tiny local smoke fixture
+- `M2F2-Det` MPS status should be described as verified outside sandbox; the sandbox can still falsely report MPS as unavailable even when the host run succeeds
 - todo: research shrinking, porting, and local deployment paths for the defense models so they can run in practical local environments
+- WIFS-specific todo:
+- turn local deployment into an explicit evaluation axis with per-method notes on runtime, device support, setup burden, and fidelity
+- distinguish benchmark-faithful, approximation-grade, and runtime-validity-only results in every table draft
 - planned structural cleanup: move attack wrappers next to protection wrappers under `Models/`, and split backend storage into explicit `attack/` and `protection/` subtrees so both families follow the same layout
 
 Runtime planning
@@ -53,7 +121,14 @@ Runtime planning
 - Recognition models should also leave the shared system environment:
 - give each recognizer its own env under `Backends/workdirs/recognition/<model>/`
 - relocate recognizer caches and downloaded weights into `Backends/assets/recognition/<model>/`
-- current concrete targets are `Backends/workdirs/recognition/insightface/venv`, `Backends/workdirs/recognition/facenet/venv`, `Backends/assets/recognition/insightface/`, and `Backends/assets/recognition/facenet/`
+- current concrete recognizer envs are `Backends/workdirs/recognition/insightface/venv`, `Backends/workdirs/recognition/facenet/venv`, `Backends/workdirs/recognition/adaface/venv`, and `Backends/workdirs/recognition/magface/venv`
+- current concrete recognizer asset roots are `Backends/assets/recognition/insightface/`, `Backends/assets/recognition/facenet/`, `Backends/assets/recognition/adaface/`, and `Backends/assets/recognition/magface/`
+- current recognition external source roots are `Backends/sources/AdaFace_upstream/` and `Backends/sources/MagFace_upstream/`
+- current recognition checkpoint-backed smoke-test status:
+- `InsightFace`: established local baseline
+- `FaceNet`: established local baseline
+- `AdaFace`: checkpoint-backed generator smoke test succeeded on MPS outside sandbox
+- `MagFace`: checkpoint-backed generator smoke test succeeded on MPS outside sandbox
 - Keep defense-model integration structurally consistent with the attack backends where practical:
 - preserve third-party source snapshots under `Backends/sources/attack/<Name>_upstream/` and `Backends/sources/protection/<Name>_upstream/`
 - keep mutable weights and support assets under `Backends/assets/attack/<method>/` and `Backends/assets/protection/<method>/`
@@ -62,6 +137,12 @@ Runtime planning
 - give each protection model its own venv rather than forcing one shared protection stack
 - protection-model device preference should default to `cuda -> mps -> cpu`
 - record exact adaptations and verification commands in working notes with the same blunt fidelity labeling used for attack backends
+- scoring / positioning rule for defense methods:
+- do not force proactive cloaking, recognizer hardening, and post-hoc detection into one flat leaderboard
+- do not force proactive protection and post-hoc detection into the same leaderboard even when both reduce attack impact
+- compare methods within their defense layer first, then discuss how the layers can be combined into a realistic defense strategy
+- WIFS positioning rule:
+- the core result should read as a security / forensics comparison under realistic constraints, not as a generic model zoo bake-off
 
 Licensing and source summary
 - `simswap`: official `neuralchen/SimSwap` upstream is vendored locally; license is CC BY-NC 4.0, so treat it as non-commercial / research-use only
@@ -86,9 +167,14 @@ Presentation notes
 - constrained ASR or source-preserving ASR
 - clean difficulty summary
 - difficulty-stratified results
+- defense-layer results with deployment-oriented qualifiers
 - Avoid presenting only one pooled ASR number
 - Verification results are easiest to digest when tied back to the decision threshold
 - Useful derived reporting targets include mean clean margin, residual margin, FAR-conditioned ASR, and clean-margin bins
+- preferred WIFS figure / table set:
+- attack success by attack family and recognizer
+- defense effectiveness by layer on the same manipulated-probe subset
+- compact deployment table with runtime / device / fidelity labels
 
 Legacy progress note preserved from older notes
 - initially too aggressive learning rate on backbone; caused `0.0` accuracy for 10 epochs

@@ -14,8 +14,12 @@ DATASET_ROOT = PROJECT_ROOT / "Dataset"
 PAIRS_ROOT = DATASET_ROOT / "pairs"
 RESULTS_ROOT = PROJECT_ROOT / "Results"
 ATTACK_GENERATOR_ROOT = PROJECT_ROOT / "Modifiers" / "attack"
+ATTACK_ASSETS_ROOT = PROJECT_ROOT / "Backends" / "assets" / "attack"
+ATTACK_WORKDIR_ROOT = PROJECT_ROOT / "Backends" / "workdirs" / "attack"
 RECOGNITION_ASSETS_ROOT = PROJECT_ROOT / "Backends" / "assets" / "recognition"
 RECOGNITION_WORKDIR_ROOT = PROJECT_ROOT / "Backends" / "workdirs" / "recognition"
+PROTECTION_ASSETS_ROOT = PROJECT_ROOT / "Backends" / "assets" / "protection"
+PROTECTION_WORKDIR_ROOT = PROJECT_ROOT / "Backends" / "workdirs" / "protection"
 
 THROTTLE_BATCH_SIZE = 32
 MODEL_THROTTLE_DELAYS = {
@@ -32,7 +36,6 @@ ONNX_PROVIDER_ENV = "FYP_ONNX_PROVIDER"
 ATTACK_METHODS = (
     "advfacegan",
     "dim",
-    "faceshifter",
     "fomm",
     "mipgan",
     "mordiff",

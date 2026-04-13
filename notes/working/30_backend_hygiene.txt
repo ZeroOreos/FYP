@@ -8,8 +8,18 @@ Backend hygiene standard
 - Temporary workdirs live in `Backends/workdirs/<method>/`
 - Do not keep nested `.git` directories inside vendored backend sources
 - Do not keep runtime outputs, smoke-test artifacts, demo media, or regenerated caches inside backend source trees unless intentionally preserved and documented
+- Route wrapper outputs into `Backends/workdirs/` by default so source snapshots stay close to upstream layout
 - If a backend needs a support repo such as `taming-transformers`, record it in `Backends/manifest.json`
 - Before calling a backend clean, run `python3 scripts/bootstrap_backends.py audit`
+
+Current cleanup pass
+- `facial_attributes_obfuscation` stage-1 wrapper now writes score outputs under its workdir instead of `Backends/sources/.../results`
+- `m2f2_det` stage-1 wrapper now provides a run dir, and upstream inference writes checkpoints logs and result CSVs under its workdir instead of the vendored source tree
+- Removed generated `__pycache__` directories from protection backends
+- Removed generated source-tree runtime outputs from `M2F2_Det_upstream/outputs`, `Facial_Attributes_Obfuscation_upstream/results`, and `UniDefense_upstream/runs`
+- Removed generated `M2F2_Det_upstream/checkpoints/stage_1/test.log` and source-tree `result_current_model_180.csv`
+- Removed low-risk non-runtime payloads from protection source trees, including demo notebooks, generated docs/media bundles, and teaser images
+- Left README, LICENSE, environment files, and provenance-style placeholder files in place
 
 Rule for future backend entries
 - For every backend added or changed, append:

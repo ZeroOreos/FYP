@@ -99,22 +99,22 @@ Implementation provenance used in this repo
 
 - [active] neuralchen/SimSwap repository.
   Link: https://github.com/neuralchen/SimSwap
-  Used for: `Backends/sources/SimSwap_upstream/`, local `simswap` wrapper, and verified swap generation in this repo.
+  Used for: `Backends/sources/attack/SimSwap_upstream/`, local `simswap` wrapper, and verified swap generation in this repo.
   Notes: Official SimSwap repository. Local verification used the upstream repo plus its published ArcFace and generator assets, with small CPU-compatibility patches in the wrapper path.
 
 - [active] AliaksandrSiarohin/first-order-model repository.
   Link: https://github.com/AliaksandrSiarohin/first-order-model
-  Used for: `Backends/sources/FOMM_upstream/` and the local `fomm` wrapper.
+  Used for: `Backends/sources/attack/FOMM_upstream/` and the local `fomm` wrapper.
   Notes: Official FOMM repository. The local verified checkpoint came from a clean Hugging Face mirror after the original asset path produced corrupted downloads during setup.
 
-- [active] maum-ai/faceshifter repository.
+- [retired] maum-ai/faceshifter repository.
   Link: https://github.com/maum-ai/faceshifter
-  Used for: `Backends/sources/FaceShifter_upstream/` and the local `faceshifter` wrapper scaffold.
-  Notes: Unofficial PyTorch implementation of FaceShifter focused on AEI-Net. No trustworthy pretrained AEI checkpoint was found during setup.
+  Used for: historical attack-shortlist provenance only.
+  Notes: Unofficial PyTorch implementation of FaceShifter focused on AEI-Net. No trustworthy pretrained AEI checkpoint was found during setup, so the local backend and scaffold were removed from the active repo layout.
 
 - [active] Sanoojan/REFace repository.
   Link: https://github.com/Sanoojan/REFace
-  Used for: `Backends/sources/REFace_upstream/`, `Modifiers/attack/reface/`, and the verified modern face-swap backend in this repo.
+  Used for: `Backends/sources/attack/REFace_upstream/`, `Modifiers/attack/reface/`, and the verified modern face-swap backend in this repo.
   Notes: Official REFace implementation. See `notes/working/20_backend_adaptations.txt` for the exact compatibility patches and runtime fixes.
 
 - [active] Local implementation adaptation log.

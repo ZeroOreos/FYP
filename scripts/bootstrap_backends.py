@@ -115,7 +115,17 @@ def print_report(manifest: dict) -> tuple[int, int]:
 
 def prepare_layout(manifest: dict) -> None:
     layout = manifest.get("layout", {})
-    for key in ("dependencies_root", "assets_root", "workdirs_root"):
+    for key in (
+        "dependencies_root",
+        "assets_root",
+        "workdirs_root",
+        "attack_sources_root",
+        "attack_assets_root",
+        "attack_workdirs_root",
+        "protection_sources_root",
+        "protection_assets_root",
+        "protection_workdirs_root",
+    ):
         path_str = layout.get(key)
         if not path_str:
             continue

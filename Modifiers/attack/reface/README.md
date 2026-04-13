@@ -4,10 +4,10 @@ This entrypoint is the FYP-facing wrapper for REFace.
 
 - Canonical pipeline entrypoint: `generate.py`
 - Wrapper implementation: `wrapper.py`
-- Expected backend source location: `Backends/sources/REFace_upstream/`
+- Expected backend source location: `Backends/sources/attack/REFace_upstream/`
 - Preferred support dependency location: `Backends/sources/dependencies/taming-transformers/`
 - Legacy support dependency fallback: `Backends/sources/taming-transformers/`
-- Expected backend assets location: `Backends/assets/reface/`
+- Expected backend assets location: `Backends/assets/attack/reface/`
 
 Fidelity note:
 

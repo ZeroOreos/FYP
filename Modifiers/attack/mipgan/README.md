@@ -4,8 +4,8 @@ This entrypoint is the FYP-facing wrapper for MIPGAN.
 
 - Canonical pipeline entrypoint: `generate.py`
 - Wrapper implementation: `wrapper.py`
-- Expected backend source location: `Backends/sources/MIPGAN_upstream/`
-- Expected backend assets location: `Backends/assets/mipgan/`
+- Expected backend source location: `Backends/sources/attack/MIPGAN_upstream/`
+- Expected backend assets location: `Backends/assets/attack/mipgan/`
 
 Fidelity note:
 

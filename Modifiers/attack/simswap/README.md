@@ -4,8 +4,8 @@ This entrypoint is the FYP-facing wrapper for SimSwap.
 
 - Canonical pipeline entrypoint: `generate.py`
 - Wrapper implementation: `wrapper.py`
-- Expected backend source location: `Backends/sources/SimSwap_upstream/`
-- Expected backend assets location: `Backends/assets/simswap/`
+- Expected backend source location: `Backends/sources/attack/SimSwap_upstream/`
+- Expected backend assets location: `Backends/assets/attack/simswap/`
 
 Fidelity note:
 

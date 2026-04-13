@@ -1,0 +1,53 @@
+# Pivot Options
+
+1. Identity-Risk Stratified Deepfake Security
++ Tests whether vulnerability clusters by clean verification margin.
++ Strong security value: identifies high-risk identity/pair regimes.
++ Works with current recognizers as measurement instruments.
+- Needs enough coverage per margin bin to keep estimates stable.
+- Metrics: ASR by margin bin; detector miss by margin bin; conditional risk after attack success.
+
+2. Cross-Recognizer Agreement as Forensic Confidence Signal
++ Tests whether recognizer disagreement predicts manipulated-probe risk.
++ Strong system-level framing without proposing a new detector.
++ Directly leverages the multi-recognizer setup.
+- Requires careful disagreement-score design and calibration.
+- Metrics: disagreement score; ASR under single vs pooled recognizers; fake-flagging AUC.
+
+3. Verification Margin as Security Triage Tool
++ Tests whether clean verification difficulty predicts impersonation risk.
++ Most executable with current infrastructure.
++ No detector needed for the main claim.
+- Margin can be recognizer-specific; calibration must be model-aware.
+- Metrics: ASR by margin bin; ASR-vs-margin calibration; risk-focused pair-selection efficiency.
+
+4. Family-Specific Failure Geometry
++ Tests whether swap, reenactment, and morph attacks fail/succeed in different regions.
++ Stronger than a flat attack leaderboard.
++ Uses family diversity without requiring a huge model zoo.
+- Needs clear family definitions and balanced sample counts.
+- Metrics: ASR by family; similarity/margin distribution shifts; disagreement by family.
+
+5. Detectability Not Monotonic with Biometric Success
++ Tests whether the most dangerous biometric attacks are always hardest to detect.
++ Directly links biometric risk to forensic observability.
++ More informative than reporting ASR and detector AUC separately.
+- Correlation analysis needs robust uncertainty estimates.
+- Metrics: ASR; detector score/miss rate; association between biometric success and detectability.
+
+6. Stable Conclusions Under Imperfect Reproduction
++ Tests which conclusions remain valid under constrained, imperfect method reproduction.
++ Converts practical constraints into a methodological contribution.
++ Useful when framed as conclusion stability, not implementation hardship.
+- Must predefine stability criteria and perturbation protocol.
+- Metrics: ranking stability; sensitivity to method inclusion/exclusion.
+
+Recommended order
+1. Identity-Risk Stratified Deepfake Security
+2. Cross-Recognizer Agreement as Forensic Confidence Signal
+3. Verification Margin as Security Triage Tool
+
+Avoid
+- Detector-architecture papers.
+- Flat mixed-fidelity leaderboards.
+- Broad claims from smoke-tested models.

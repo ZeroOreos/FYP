@@ -46,9 +46,9 @@ def bootstrap_project_root(module_file: str | Path, parents: int = 3) -> Path:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKENDS_ROOT = PROJECT_ROOT / "Backends"
-BACKEND_SOURCES_ROOT = BACKENDS_ROOT / "sources"
-BACKEND_ASSETS_ROOT = BACKENDS_ROOT / "assets"
-BACKEND_WORKDIRS_ROOT = BACKENDS_ROOT / "workdirs"
+BACKEND_SOURCES_ROOT = BACKENDS_ROOT / "sources" / "attack"
+BACKEND_ASSETS_ROOT = BACKENDS_ROOT / "assets" / "attack"
+BACKEND_WORKDIRS_ROOT = BACKENDS_ROOT / "workdirs" / "attack"
 
 
 @dataclass(frozen=True)
