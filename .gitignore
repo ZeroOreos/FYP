@@ -25,14 +25,77 @@ tmp/**
 # Local heavyweight checkpoints and support caches
 Backends/assets/**
 !Backends/assets/.gitkeep
-!Backends/assets/*/
-!Backends/assets/*/.gitkeep
+!Backends/assets/**/
+!Backends/assets/**/.gitkeep
 
 # Backend workdirs
 Backends/workdirs/**
 !Backends/workdirs/.gitkeep
-!Backends/workdirs/*/
-!Backends/workdirs/*/.gitkeep
+!Backends/workdirs/**/
+!Backends/workdirs/**/.gitkeep
+
+# Vendored upstream sources are local-only.
+# Track provenance and important entrypoints in manifest/notes instead.
+Backends/sources/**
+!Backends/sources/.gitkeep
+!Backends/sources/attack/
+!Backends/sources/attack/.gitkeep
+!Backends/sources/protection/
+!Backends/sources/protection/.gitkeep
+!Backends/sources/dependencies/
+!Backends/sources/dependencies/.gitkeep
+!Backends/sources/AdaFace_upstream/
+!Backends/sources/AdaFace_upstream/README.md
+!Backends/sources/AdaFace_upstream/inference.py
+!Backends/sources/MagFace_upstream/
+!Backends/sources/MagFace_upstream/README.md
+!Backends/sources/MagFace_upstream/inference/
+!Backends/sources/MagFace_upstream/inference/gen_feat.py
+!Backends/sources/attack/AdvFaceGAN_upstream/
+!Backends/sources/attack/AdvFaceGAN_upstream/README.md
+!Backends/sources/attack/DiM_native_upstream/
+!Backends/sources/attack/DiM_native_upstream/README.md
+!Backends/sources/attack/FOMM_upstream/
+!Backends/sources/attack/FOMM_upstream/demo.py
+!Backends/sources/attack/MIPGAN_upstream/
+!Backends/sources/attack/MIPGAN_upstream/README.md
+!Backends/sources/attack/MIPGAN_upstream/MIPGAN-license-240916.pdf
+!Backends/sources/attack/MorDIFF_upstream/
+!Backends/sources/attack/MorDIFF_upstream/README.md
+!Backends/sources/attack/REFace_upstream/
+!Backends/sources/attack/REFace_upstream/README.md
+!Backends/sources/attack/REFace_upstream/scripts/
+!Backends/sources/attack/REFace_upstream/scripts/inference_swap_selected.py
+!Backends/sources/attack/SimSwap_upstream/
+!Backends/sources/attack/SimSwap_upstream/README.md
+!Backends/sources/protection/Fawkes_upstream/
+!Backends/sources/protection/Fawkes_upstream/README.md
+!Backends/sources/protection/Fawkes_upstream/setup.py
+!Backends/sources/protection/Fawkes_upstream/LICENSE
+!Backends/sources/protection/FaceShield_upstream/
+!Backends/sources/protection/FaceShield_upstream/README.md
+!Backends/sources/protection/FaceShield_upstream/environment.yaml
+!Backends/sources/protection/FALCO_upstream/
+!Backends/sources/protection/FALCO_upstream/README.md
+!Backends/sources/protection/FALCO_upstream/LICENSE
+!Backends/sources/protection/DeepPrivacy2_upstream/
+!Backends/sources/protection/DeepPrivacy2_upstream/readme.md
+!Backends/sources/protection/DeepPrivacy2_upstream/LICENSE
+!Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/
+!Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/README.md
+!Backends/sources/protection/UniDefense_upstream/
+!Backends/sources/protection/UniDefense_upstream/README.md
+!Backends/sources/protection/M2F2_Det_upstream/
+!Backends/sources/protection/M2F2_Det_upstream/README.md
+!Backends/sources/protection/M2F2_Det_upstream/LICENSE
+!Backends/sources/dependencies/taming-transformers/
+!Backends/sources/dependencies/taming-transformers/setup.py
+!Backends/sources/dependencies/taming-transformers/README.md
+!Backends/sources/dependencies/taming-transformers/License.txt
+!Backends/sources/dependencies/diffae/
+!Backends/sources/dependencies/diffae/README.md
+!Backends/sources/dependencies/diffae/templates.py
+!Backends/sources/dependencies/diffae/LICENSE
 
 # Regenerable local model testing outputs
 Models/*/testing/*.npz
@@ -40,19 +103,3 @@ Models/*/testing/*.csv
 
 # Local scratch image kept from older notes
 Images/test0.jpeg
-
-# Upstream repo runtime outputs and downloaded archives
-Backends/sources/*/.git.backup/
-Backends/sources/*/output/
-Backends/sources/*/tmp/
-Backends/sources/*/temp/
-Backends/sources/*/temp_results/
-Backends/sources/*/checkpoints/
-Backends/sources/*/arcface_model/
-Backends/sources/*/antelope.zip
-Backends/sources/REFace_upstream/assets/
-Backends/sources/REFace_upstream/examples/
-Backends/sources/SimSwap_upstream/crop_224/
-Backends/sources/SimSwap_upstream/demo_file/
-Backends/sources/SimSwap_upstream/docs/img/
-Backends/sources/SimSwap_upstream/simswaplogo/
