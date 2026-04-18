@@ -1,105 +1,32 @@
-# macOS
+# OS and editor clutter
 .DS_Store
+.vscode/
 
-# Python caches
+# Local Python environments and caches
+.venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 
-# Local IDE / editor clutter
-.vscode/
+# Local datasets and generated dataset artifacts
+Dataset/WebFace4M/raw/
+Dataset/WebFace4M/manifests/
+Dataset/WebFace4M/subset_manifests/
+Dataset/WebFace42M/raw/
+Dataset/pairs/*.npz
+Dataset/pairs/*.npy
 
-# Generated datasets and experiment outputs
-Dataset/**/*.jpg
-Dataset/**/*.jpeg
-Dataset/**/*.png
-Dataset/**/*.bmp
-Dataset/**/*.webp
-Dataset/**/*.npz
-Dataset/**/*.npy
-Results/**
-!Results/compiled_results.csv
-tmp/**
+# Local training outputs
+TrainingRuns/
+Results/
+tmp/
 
-# Local heavyweight checkpoints and support caches
-Backends/assets/**
-!Backends/assets/.gitkeep
-!Backends/assets/**/
-!Backends/assets/**/.gitkeep
+# Local backend assets, workdirs, and vendored upstream checkouts
+Backends/assets/
+Backends/workdirs/
+Backends/sources/
 
-# Backend workdirs
-Backends/workdirs/**
-!Backends/workdirs/.gitkeep
-!Backends/workdirs/**/
-!Backends/workdirs/**/.gitkeep
-
-# Vendored upstream sources are local-only.
-# Track provenance and important entrypoints in manifest/notes instead.
-Backends/sources/**
-!Backends/sources/.gitkeep
-!Backends/sources/attack/
-!Backends/sources/attack/.gitkeep
-!Backends/sources/protection/
-!Backends/sources/protection/.gitkeep
-!Backends/sources/dependencies/
-!Backends/sources/dependencies/.gitkeep
-!Backends/sources/AdaFace_upstream/
-!Backends/sources/AdaFace_upstream/README.md
-!Backends/sources/AdaFace_upstream/inference.py
-!Backends/sources/MagFace_upstream/
-!Backends/sources/MagFace_upstream/README.md
-!Backends/sources/MagFace_upstream/inference/
-!Backends/sources/MagFace_upstream/inference/gen_feat.py
-!Backends/sources/attack/AdvFaceGAN_upstream/
-!Backends/sources/attack/AdvFaceGAN_upstream/README.md
-!Backends/sources/attack/DiM_native_upstream/
-!Backends/sources/attack/DiM_native_upstream/README.md
-!Backends/sources/attack/FOMM_upstream/
-!Backends/sources/attack/FOMM_upstream/demo.py
-!Backends/sources/attack/MIPGAN_upstream/
-!Backends/sources/attack/MIPGAN_upstream/README.md
-!Backends/sources/attack/MIPGAN_upstream/MIPGAN-license-240916.pdf
-!Backends/sources/attack/MorDIFF_upstream/
-!Backends/sources/attack/MorDIFF_upstream/README.md
-!Backends/sources/attack/REFace_upstream/
-!Backends/sources/attack/REFace_upstream/README.md
-!Backends/sources/attack/REFace_upstream/scripts/
-!Backends/sources/attack/REFace_upstream/scripts/inference_swap_selected.py
-!Backends/sources/attack/SimSwap_upstream/
-!Backends/sources/attack/SimSwap_upstream/README.md
-!Backends/sources/protection/Fawkes_upstream/
-!Backends/sources/protection/Fawkes_upstream/README.md
-!Backends/sources/protection/Fawkes_upstream/setup.py
-!Backends/sources/protection/Fawkes_upstream/LICENSE
-!Backends/sources/protection/FaceShield_upstream/
-!Backends/sources/protection/FaceShield_upstream/README.md
-!Backends/sources/protection/FaceShield_upstream/environment.yaml
-!Backends/sources/protection/FALCO_upstream/
-!Backends/sources/protection/FALCO_upstream/README.md
-!Backends/sources/protection/FALCO_upstream/LICENSE
-!Backends/sources/protection/DeepPrivacy2_upstream/
-!Backends/sources/protection/DeepPrivacy2_upstream/readme.md
-!Backends/sources/protection/DeepPrivacy2_upstream/LICENSE
-!Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/
-!Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/README.md
-!Backends/sources/protection/UniDefense_upstream/
-!Backends/sources/protection/UniDefense_upstream/README.md
-!Backends/sources/protection/M2F2_Det_upstream/
-!Backends/sources/protection/M2F2_Det_upstream/README.md
-!Backends/sources/protection/M2F2_Det_upstream/LICENSE
-!Backends/sources/dependencies/taming-transformers/
-!Backends/sources/dependencies/taming-transformers/setup.py
-!Backends/sources/dependencies/taming-transformers/README.md
-!Backends/sources/dependencies/taming-transformers/License.txt
-!Backends/sources/dependencies/diffae/
-!Backends/sources/dependencies/diffae/README.md
-!Backends/sources/dependencies/diffae/templates.py
-!Backends/sources/dependencies/diffae/LICENSE
-
-# Regenerable local model testing outputs
+# Regenerated local model-test outputs
 Models/*/testing/*.npz
 Models/*/testing/*.csv
-
-# Local scratch image kept from older notes
-Images/test0.jpeg
