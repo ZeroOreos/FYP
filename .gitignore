@@ -31,11 +31,15 @@ htmlcov/
 Dataset/**/raw/
 Dataset/**/manifests/
 Dataset/**/subset_manifests/
+Dataset/**/images/
+Dataset/**/extract_manifest.json
 Dataset/pairs/*.npz
 Dataset/pairs/*.npy
 
 # Server-local runs, exports, logs, and scratch space
 TrainingRuns/
+TrainingExports/
+Training/generated/
 Results/
 runs/
 tmp/

@@ -12,6 +12,7 @@ from pathlib import Path
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build train/val manifests for shard-backed WebFace4M training.")
     parser.add_argument("--target-root", type=Path, default=Path("Dataset/WebFace4M"))
+    parser.add_argument("--image-root", type=Path, default=None, help="Optional extracted image root for direct file loading.")
     parser.add_argument("--val-fraction", type=float, default=0.02)
     parser.add_argument("--min-val-per-class", type=int, default=1)
     parser.add_argument("--max-val-per-class", type=int, default=5)
@@ -41,6 +42,7 @@ def main() -> None:
     target_root = args.target_root.resolve()
     raw_root = target_root / "raw"
     manifest_root = target_root / "manifests"
+    image_root = args.image_root.resolve() if args.image_root is not None else None
     manifest_root.mkdir(parents=True, exist_ok=True)
 
     shard_paths = sorted(raw_root.glob("*.tar.gz"))
@@ -97,6 +99,8 @@ def main() -> None:
                     "label_idx": class_to_idx[label_name],
                     "rel_path": f"{label_name}/{key}.jpg",
                 }
+                if image_root is not None:
+                    payload["image_path"] = str((image_root / label_name / f"{key}.jpg").resolve())
                 if split == "val":
                     val_handle.write(json.dumps(payload, sort_keys=True) + "\n")
                     val_samples += 1
@@ -116,6 +120,7 @@ def main() -> None:
         "total_samples": total_samples,
         "train_samples": train_samples,
         "val_samples": val_samples,
+        "image_root": str(image_root) if image_root is not None else None,
         "val_fraction": args.val_fraction,
         "min_val_per_class": args.min_val_per_class,
         "max_val_per_class": args.max_val_per_class,

@@ -10,7 +10,6 @@ Current repo state
 - The current trainable target is `ArcFace` on `ResNet18` as the current real verification-stage backbone.
 - The intended defended recognizer ensemble for the paper is `ArcFace`, `CosFace`, and `CurricularFace`.
 - The intended attacker ensemble for the paper is split into primary attackers and surrogate attackers.
-- The repo already contains small completed sample runs under `TrainingRuns/`.
 - `CosFace` and `CurricularFace` now complete real WebFace4M subset non-smoke attacked runs alongside `ArcFace` in the same local training API.
 - Native `CosFace` and `CurricularFace` sources are now pulled into `Backends`.
 - The tuned path should now be framed as recognizer training under a two-sided ensemble: recognizer ensemble plus attacker ensemble.
@@ -33,14 +32,6 @@ What exists now
 - native manifest-backed shard loading for `WebFace4M`
 - a `WebFace4M` manifest-prep script for train and val JSONL generation
 - corrected identification metrics that use inference-time logits instead of label-margin training logits
-
-Sample runs already present
-- `TrainingRuns/arcface_resnet18_smoke`
-- `TrainingRuns/arcface_resnet18_ensemble_smoke`
-- `TrainingRuns/ceiling_clean_smoke`
-- `TrainingRuns/arcface_resnet18_small_live`
-- `TrainingRuns/webface4m_arcface_resnet18_partial_lowepoch_mps`
-- `TrainingRuns/webface4m_arcface_resnet18_subset_lowepoch_mps`
 
 What research says to do next
 - frame the system as adversarial recognizer training with a defended recognizer pool and an attack pool
@@ -130,7 +121,7 @@ Current tuned recipe under that budget
 - keep dropout at `0.0` in the tuned serious presets instead of `0.4`
 - keep morphing, makeup, and generative attacks periodic or eval-time rather than the default main-loop attacker path
 - keep the final research framing centered on the named primary-attacker and surrogate-attacker sets, while the code treats standard primary attackers as the main loop and surrogate attackers as cached external pressure
-- use native shard manifests for `WebFace4M` instead of extracting the full dataset into an identity-root tree
+- keep manifests as the training contract for `WebFace4M`; optionally extract JPEGs on the server if direct file reads benchmark better there
 - target effective batch around `512` when hardware allows; otherwise use accumulation later instead of weakening the core method
 - decay the LR around `40-45%`, `75%`, and `90%` of the first serious schedule
 - keep checkpointing and loader-worker counts tuned for the actual final device, not left always-on by default
@@ -142,10 +133,8 @@ Joint pool timing assumption
 
 Latest local tuning result
 - `WebFace4M` ingestion is now implemented in code
-- a low-epoch shard-backed `WebFace4M` subset run now completes on `MPS`
-- that subset run shows the real path works end to end: manifest loader, training loop, checkpoints, and verification pairs
-- the remaining blocker for the serious full run is the long local shard download, not the training contract
-- the remaining cleanup task is to finish the run-history and reporting migration to `WebFace4M`
+- the repo is ready to bootstrap the shard set directly on the server
+- the server path can now either stream from shard manifests or prefer extracted JPEGs while keeping the same manifest contract
 
 Do not pretend
 - the placeholder backbone is the paper result

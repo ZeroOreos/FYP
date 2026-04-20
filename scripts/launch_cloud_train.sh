@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-# Render a server-local config, run training, and export a compact artifact bundle.
+# Render a server-local config and run training on the server.
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
@@ -14,11 +14,10 @@ fi
 BASE_CONFIG=$1
 RUN_NAME=${2:-}
 RENDERED_DIR=${FYP_RENDERED_CONFIG_ROOT:-"$PROJECT_ROOT/Training/generated"}
-EXPORT_ROOT=${FYP_EXPORT_ROOT:-"$PROJECT_ROOT/TrainingExports"}
 USE_TORCHRUN=${USE_TORCHRUN:-0}
 NPROC_PER_NODE=${NPROC_PER_NODE:-1}
 
-mkdir -p "$RENDERED_DIR" "$EXPORT_ROOT"
+mkdir -p "$RENDERED_DIR"
 
 STAMP=$(date -u +"%Y%m%dT%H%M%SZ")
 if [ -z "$RUN_NAME" ]; then
@@ -52,9 +51,5 @@ else
   python3 "$PROJECT_ROOT/main_train_ensemble.py" --config "$RENDERED_CONFIG"
 fi
 
-python3 "$PROJECT_ROOT/scripts/export_run_artifacts.py" \
-  --run-dir "$RUN_DIR" \
-  --export-root "$EXPORT_ROOT" \
-  --bundle
-
-echo "[INFO] training and export complete"
+echo "[INFO] training complete"
+echo "[INFO] run_dir=$RUN_DIR"

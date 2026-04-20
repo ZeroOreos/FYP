@@ -22,7 +22,7 @@ This repo is now training-first. The old recognition-only and attack-materializa
 
 - `Dataset/`: clean data and local split outputs
 - `Training/`: ensemble training stack
-- `TrainingRuns/`: checkpoints and run summaries
+- `TrainingRuns/`: server-local checkpoints and run summaries
 - `Modifiers/attack/`: cached heavy-attack wrappers and generators
 - `Backends/`: local envs, upstream sources, and checkpoint assets
 - `Utility/`: small shared runtime helpers
@@ -85,7 +85,7 @@ This writes canonical paper-reporting configs based on the full `WebFace4M` mani
 
 ## Shell Server Workflow
 
-For a plain remote shell server, the repo now includes a minimal cloud-oriented path:
+For a plain remote shell server, the repo now includes a minimal upload-first path:
 
 1. Bootstrap the dataset on the server instead of copying laptop-local manifests:
 
@@ -96,15 +96,24 @@ sh scripts/bootstrap_cloud_webface4m.sh
 
 This downloads shards into `raw/` and regenerates manifest files with server-local absolute shard paths.
 
-2. Render a server-local config and launch a run:
+If direct filesystem JPEG reads turn out to be faster on the server, keep the same manifest contract and opt into extraction:
+
+```bash
+EXTRACT_IMAGES=1 \
+FYP_WEBFACE4M_ROOT=/shared/fyp/data/WebFace4M \
+sh scripts/bootstrap_cloud_webface4m.sh
+```
+
+That extracts images under `images/`, rebuilds manifests with `image_path` entries, and the current loader will prefer extracted files while still falling back to shard reads when needed.
+
+2. Render a server-local config and launch the serious run:
 
 ```bash
 FYP_WEBFACE4M_ROOT=/shared/fyp/data/WebFace4M \
 FYP_OUTPUT_ROOT=/shared/fyp/runs \
-FYP_EXPORT_ROOT=/shared/fyp/exports \
 sh scripts/launch_cloud_train.sh \
   Training/arcface_webface4m_resnet18_cloud_template.json \
-  arcface-r18-server-smoke
+  arcface-r18-server-serious
 ```
 
 If you want multi-GPU launch through `torchrun`, set:
@@ -112,12 +121,12 @@ If you want multi-GPU launch through `torchrun`, set:
 ```bash
 USE_TORCHRUN=1 NPROC_PER_NODE=4 sh scripts/launch_cloud_train.sh \
   Training/arcface_webface4m_resnet18_cloud_template.json \
-  arcface-r18-server-ddp
+  arcface-r18-server-ddp-serious
 ```
 
-3. Pull back metrics and logs from the exported bundle under `FYP_EXPORT_ROOT`.
+The default cloud template now matches the repo's 24-epoch serious `ResNet18` schedule instead of the older 12-epoch smoke cadence.
 
-Each run export contains:
+Each run writes directly into the server run directory:
 
 - `latest_metrics.json`: compact latest-epoch metrics for dashboards or quick checks
 - `metrics.jsonl`: one JSON record per epoch
@@ -127,20 +136,15 @@ Each run export contains:
 - `config.snapshot.json`: exact resolved config used for the run
 - `repro_state.json`: runtime and package provenance
 
-You can re-export an existing run manually:
+If you still need a compact export later, you can package an existing run manually:
 
 ```bash
 python3 scripts/export_run_artifacts.py \
-  --run-dir /shared/fyp/runs/arcface-r18-server-smoke \
+  --run-dir /shared/fyp/runs/arcface-r18-server-serious \
   --export-root /shared/fyp/exports \
   --bundle
 ```
 
-The generated `.tar.gz` bundle is the recommended artifact to `scp` or `rsync` back off the server.
-
 ## Verified Runs
 
-- clean `WebFace4M` subset attempt:
-  [TrainingRuns/webface4m_arcface_resnet18_subset_lowepoch_mps](/Users/jeromeharianto/Documents/School2/FYP/TrainingRuns/webface4m_arcface_resnet18_subset_lowepoch_mps)
-- attacked ensemble smoke run:
-  [TrainingRuns/webface4m_arcface_resnet18_ensemble_smoke](/Users/jeromeharianto/Documents/School2/FYP/TrainingRuns/webface4m_arcface_resnet18_ensemble_smoke)
+Local run artifacts are intentionally ignored and should be purged before uploading this repo to a server.

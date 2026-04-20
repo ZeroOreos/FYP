@@ -33,6 +33,7 @@ class WebDatasetSample:
     label_name: str
     label_idx: int
     rel_path: str
+    image_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -172,6 +173,11 @@ class WebFaceManifestDataset(_TransformMixin, Dataset):
                         label_name=label_name,
                         label_idx=self.class_to_idx[label_name],
                         rel_path=rel_path,
+                        image_path=(
+                            Path(str(item["image_path"])).resolve()
+                            if item.get("image_path") is not None
+                            else None
+                        ),
                     )
                 )
                 if remaining is not None:
@@ -196,6 +202,10 @@ class WebFaceManifestDataset(_TransformMixin, Dataset):
 
     def __getitem__(self, index: int):
         sample = self.samples[index]
+        if sample.image_path is not None and sample.image_path.is_file():
+            image = Image.open(sample.image_path).convert("RGB")
+            tensor = self._load_tensor(image)
+            return tensor, sample.label_idx, str(sample.image_path), sample.rel_path
         tar_handle = self._get_tar(sample.shard_path)
         member = tar_handle.getmember(f"{sample.key}.jpg")
         file_obj = tar_handle.extractfile(member)
