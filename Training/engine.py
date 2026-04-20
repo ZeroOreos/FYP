@@ -925,6 +925,7 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
         train_hard_loss = torch.zeros((), device=device)
         train_member_metrics_totals: dict[str, dict[str, dict[str, torch.Tensor | float]]] = {}
         batches = 0
+        accumulation_steps = max(1, int(config.gradient_accumulation_steps))
 
         total_batches = max(1, len(train_loader))
         total_train_samples = len(train_ds)
@@ -959,150 +960,163 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                     "lr": f"{optimizer.param_groups[0]['lr']:.4g}",
                     "cf": f"{float(schedule['clean_fraction']):.2f}",
                     "atk": "on" if bool(schedule["attacks_enabled"]) else "off",
+                    "accum": f"1/{accumulation_steps}",
                     "step": f"0/{total_batches}",
                 },
                 refresh=False,
             )
+        optimizer.zero_grad(set_to_none=True)
         for batch_index, (images, labels, _, rel_paths) in enumerate(train_loader, start=1):
             try:
                 images = images.to(device, non_blocking=device.type == "cuda")
                 labels = labels.to(device, non_blocking=device.type == "cuda")
                 images = _maybe_channels_last_tensor(images, config, device)
-                optimizer.zero_grad(set_to_none=True)
                 train_model = _unwrap_model(model)
+                should_step = (batch_index % accumulation_steps == 0) or (batch_index == total_batches)
+                sync_context = (
+                    model.no_sync()
+                    if isinstance(model, DistributedDataParallel) and not should_step
+                    else contextlib.nullcontext()
+                )
 
-                with _autocast_context(config, device):
-                    clean_outputs = model(images, labels)
-                    clean_logits = clean_outputs["logits"]
-                    clean_embeddings = clean_outputs["embeddings"]
-                    clean_predict_logits = clean_outputs["predict_logits"]
-                    clean_member_outputs = clean_outputs["member_outputs"]
-                    if clean_member_outputs is None:
-                        clean_loss_per_sample = F.cross_entropy(clean_logits, labels, reduction="none")
-                        clean_loss = clean_loss_per_sample.mean()
-                    else:
-                        clean_loss_per_sample = _weighted_member_loss_per_sample(train_model, clean_member_outputs)
-                        clean_loss = clean_loss_per_sample.mean()
-                        for name, item in clean_member_outputs.items():
-                            _accumulate_member_epoch_metric(
-                                train_member_metrics_totals,
-                                name=name,
-                                key="clean_loss",
-                                value=item["loss"],
-                            )
-                            _accumulate_member_epoch_metric(
-                                train_member_metrics_totals,
-                                name=name,
-                                key="clean_accuracy",
-                                value=classification_accuracy_tensor(item["predict_logits"].detach(), labels),
-                            )
-                    hard_pairs = _mine_batch_hard_pairs(
-                        config=config,
-                        images=images,
-                        labels=labels,
-                        clean_embeddings=clean_embeddings,
-                        surrogates=surrogates,
-                        schedule=schedule,
-                    )
-
-                    if (not bool(schedule["attacks_enabled"])) or config.clean_only or not config.enabled_attackers():
-                        attack_result = None
-                        adv_loss = torch.zeros((), device=device)
-                        consistency = torch.zeros((), device=device)
-                        adv_loss_per_sample = torch.empty(0, device=device)
-                        adv_member_outputs = None
-                    else:
-                        requested_adv = int(round(images.size(0) * (1.0 - schedule["clean_fraction"])))
-                        adv_count = min(images.size(0), max(2, requested_adv))
-                        adv_images = images[:adv_count]
-                        adv_labels = labels[:adv_count]
-                        adv_rel_paths = list(rel_paths[:adv_count])
-
-                        if attack_sampler is None:
-                            raise RuntimeError("Attack sampler missing while attacks are enabled.")
-                        policy = attack_sampler.choose()
-                        attack_result = generate_attack_batch(
-                            policy=policy,
-                            images=adv_images,
-                            labels=adv_labels,
-                            rel_paths=adv_rel_paths,
-                            image_size=config.image_size,
-                            target_model=train_model,
-                            surrogates=surrogates,
-                            device=device,
-                        )
-                        attack_images = _maybe_channels_last_tensor(attack_result.images, config, device)
-                        adv_outputs = model(attack_images, adv_labels)
-                        adv_logits = adv_outputs["logits"]
-                        adv_embeddings = adv_outputs["embeddings"]
-                        adv_member_outputs = adv_outputs["member_outputs"]
-                        if adv_member_outputs is None:
-                            adv_loss_per_sample = F.cross_entropy(adv_logits, adv_labels, reduction="none")
-                            adv_loss = adv_loss_per_sample.mean()
-                            consistency = embedding_consistency_loss(clean_embeddings[:adv_count], adv_embeddings)
+                with sync_context:
+                    with _autocast_context(config, device):
+                        clean_outputs = model(images, labels)
+                        clean_logits = clean_outputs["logits"]
+                        clean_embeddings = clean_outputs["embeddings"]
+                        clean_predict_logits = clean_outputs["predict_logits"]
+                        clean_member_outputs = clean_outputs["member_outputs"]
+                        if clean_member_outputs is None:
+                            clean_loss_per_sample = F.cross_entropy(clean_logits, labels, reduction="none")
+                            clean_loss = clean_loss_per_sample.mean()
                         else:
-                            adv_loss_per_sample = _weighted_member_loss_per_sample(train_model, adv_member_outputs)
-                            adv_loss = adv_loss_per_sample.mean()
-                            consistency, per_member_consistency = _average_member_consistency(
-                                train_model,
-                                {
-                                    name: {
-                                        **item,
-                                        "embeddings": item["embeddings"][:adv_count],
-                                    }
-                                    for name, item in clean_member_outputs.items()
-                                },
-                                adv_member_outputs,
-                            )
-                            for name, item in adv_member_outputs.items():
+                            clean_loss_per_sample = _weighted_member_loss_per_sample(train_model, clean_member_outputs)
+                            clean_loss = clean_loss_per_sample.mean()
+                            for name, item in clean_member_outputs.items():
                                 _accumulate_member_epoch_metric(
                                     train_member_metrics_totals,
                                     name=name,
-                                    key="adv_loss",
+                                    key="clean_loss",
                                     value=item["loss"],
                                 )
                                 _accumulate_member_epoch_metric(
                                     train_member_metrics_totals,
                                     name=name,
-                                    key="adv_accuracy",
-                                    value=classification_accuracy_tensor(item["predict_logits"].detach(), adv_labels),
+                                    key="clean_accuracy",
+                                    value=classification_accuracy_tensor(item["predict_logits"].detach(), labels),
                                 )
-                                _accumulate_member_epoch_metric(
-                                    train_member_metrics_totals,
-                                    name=name,
-                                    key="consistency",
-                                    value=per_member_consistency.get(name, torch.zeros((), device=device)),
+                        hard_pairs = _mine_batch_hard_pairs(
+                            config=config,
+                            images=images,
+                            labels=labels,
+                            clean_embeddings=clean_embeddings,
+                            surrogates=surrogates,
+                            schedule=schedule,
+                        )
+
+                        if (not bool(schedule["attacks_enabled"])) or config.clean_only or not config.enabled_attackers():
+                            attack_result = None
+                            adv_loss = torch.zeros((), device=device)
+                            consistency = torch.zeros((), device=device)
+                            adv_loss_per_sample = torch.empty(0, device=device)
+                            adv_member_outputs = None
+                        else:
+                            requested_adv = int(round(images.size(0) * (1.0 - schedule["clean_fraction"])))
+                            adv_count = min(images.size(0), max(2, requested_adv))
+                            adv_images = images[:adv_count]
+                            adv_labels = labels[:adv_count]
+                            adv_rel_paths = list(rel_paths[:adv_count])
+
+                            if attack_sampler is None:
+                                raise RuntimeError("Attack sampler missing while attacks are enabled.")
+                            policy = attack_sampler.choose()
+                            attack_result = generate_attack_batch(
+                                policy=policy,
+                                images=adv_images,
+                                labels=adv_labels,
+                                rel_paths=adv_rel_paths,
+                                image_size=config.image_size,
+                                target_model=train_model,
+                                surrogates=surrogates,
+                                device=device,
+                            )
+                            attack_images = _maybe_channels_last_tensor(attack_result.images, config, device)
+                            adv_outputs = model(attack_images, adv_labels)
+                            adv_logits = adv_outputs["logits"]
+                            adv_embeddings = adv_outputs["embeddings"]
+                            adv_member_outputs = adv_outputs["member_outputs"]
+                            if adv_member_outputs is None:
+                                adv_loss_per_sample = F.cross_entropy(adv_logits, adv_labels, reduction="none")
+                                adv_loss = adv_loss_per_sample.mean()
+                                consistency = embedding_consistency_loss(clean_embeddings[:adv_count], adv_embeddings)
+                            else:
+                                adv_loss_per_sample = _weighted_member_loss_per_sample(train_model, adv_member_outputs)
+                                adv_loss = adv_loss_per_sample.mean()
+                                consistency, per_member_consistency = _average_member_consistency(
+                                    train_model,
+                                    {
+                                        name: {
+                                            **item,
+                                            "embeddings": item["embeddings"][:adv_count],
+                                        }
+                                        for name, item in clean_member_outputs.items()
+                                    },
+                                    adv_member_outputs,
                                 )
+                                for name, item in adv_member_outputs.items():
+                                    _accumulate_member_epoch_metric(
+                                        train_member_metrics_totals,
+                                        name=name,
+                                        key="adv_loss",
+                                        value=item["loss"],
+                                    )
+                                    _accumulate_member_epoch_metric(
+                                        train_member_metrics_totals,
+                                        name=name,
+                                        key="adv_accuracy",
+                                        value=classification_accuracy_tensor(item["predict_logits"].detach(), adv_labels),
+                                    )
+                                    _accumulate_member_epoch_metric(
+                                        train_member_metrics_totals,
+                                        name=name,
+                                        key="consistency",
+                                        value=per_member_consistency.get(name, torch.zeros((), device=device)),
+                                    )
 
-                    hard_loss = torch.zeros((), device=device)
-                    if hard_pairs.sample_indices.numel() > 0:
-                        hard_loss = hard_loss + clean_loss_per_sample[hard_pairs.sample_indices].mean()
-                        if adv_loss_per_sample.numel() > 0:
-                            adv_hard_indices = hard_pairs.sample_indices[hard_pairs.sample_indices < adv_loss_per_sample.size(0)]
-                            if adv_hard_indices.numel() > 0:
-                                hard_loss = hard_loss + adv_loss_per_sample[adv_hard_indices].mean()
+                        hard_loss = torch.zeros((), device=device)
+                        if hard_pairs.sample_indices.numel() > 0:
+                            hard_loss = hard_loss + clean_loss_per_sample[hard_pairs.sample_indices].mean()
+                            if adv_loss_per_sample.numel() > 0:
+                                adv_hard_indices = hard_pairs.sample_indices[hard_pairs.sample_indices < adv_loss_per_sample.size(0)]
+                                if adv_hard_indices.numel() > 0:
+                                    hard_loss = hard_loss + adv_loss_per_sample[adv_hard_indices].mean()
 
-                    loss = (
-                        config.clean_weight * clean_loss
-                        + config.adv_weight * adv_loss
-                        + config.consistency_weight * consistency
-                        + schedule["hard_pair_weight"] * hard_loss
-                    )
+                        loss = (
+                            config.clean_weight * clean_loss
+                            + config.adv_weight * adv_loss
+                            + config.consistency_weight * consistency
+                            + schedule["hard_pair_weight"] * hard_loss
+                        )
 
-                if not torch.isfinite(loss.detach()).all():
-                    raise RuntimeError(
-                        "Non-finite loss encountered during training "
-                        f"(epoch={epoch}, batch={batch_index}, batch_size={config.batch_size}, "
-                        f"mixed_precision={config.use_mixed_precision})."
-                    )
+                    if not torch.isfinite(loss.detach()).all():
+                        raise RuntimeError(
+                            "Non-finite loss encountered during training "
+                            f"(epoch={epoch}, batch={batch_index}, batch_size={config.batch_size}, "
+                            f"mixed_precision={config.use_mixed_precision})."
+                        )
 
-                if scaler.is_enabled():
-                    scaler.scale(loss).backward()
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    loss.backward()
-                    optimizer.step()
+                    scaled_loss = loss / accumulation_steps
+                    if scaler.is_enabled():
+                        scaler.scale(scaled_loss).backward()
+                        if should_step:
+                            scaler.step(optimizer)
+                            scaler.update()
+                            optimizer.zero_grad(set_to_none=True)
+                    else:
+                        scaled_loss.backward()
+                        if should_step:
+                            optimizer.step()
+                            optimizer.zero_grad(set_to_none=True)
             except RuntimeError as exc:
                 _raise_batch_runtime_error(
                     exc=exc,
@@ -1137,6 +1151,7 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                         "acc": f"{float((train_acc / max(1, batches)).item()):.4f}",
                         "stage": str(schedule.get("stage_name", "na")),
                         "atk": "on" if bool(schedule["attacks_enabled"]) else "off",
+                        "accum": f"{((batch_index - 1) % accumulation_steps) + 1}/{accumulation_steps}",
                         "step": f"{batch_index}/{total_batches}",
                     }
                     if attack_result is not None:
@@ -1154,6 +1169,7 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                     f" acc={float((train_acc / max(1, batches)).item()):.4f}"
                     f" stage={schedule.get('stage_name', 'na')}"
                     f" attacks={'on' if bool(schedule['attacks_enabled']) else 'off'}"
+                    f" accum={((batch_index - 1) % accumulation_steps) + 1}/{accumulation_steps}"
                 )
         if train_progress is not None:
             train_progress.close()

@@ -20,6 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--disable-distributed", action="store_true")
     parser.add_argument("--num-workers", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=None)
     return parser.parse_args()
 
@@ -53,6 +54,8 @@ def main() -> None:
         payload["num_workers"] = int(args.num_workers)
     if args.batch_size is not None:
         payload["batch_size"] = int(args.batch_size)
+    if args.gradient_accumulation_steps is not None:
+        payload["gradient_accumulation_steps"] = max(1, int(args.gradient_accumulation_steps))
     if args.epochs is not None:
         payload["epochs"] = int(args.epochs)
     if args.cached_attack_root:

@@ -55,6 +55,7 @@ class EnsembleTrainingConfig:
     surrogate_models: list[str] = field(default_factory=lambda: ["target"])
     attack_sampling_strategy: str = "weighted_random"
     batch_size: int = 32
+    gradient_accumulation_steps: int = 1
     epochs: int = 10
     learning_rate: float = 0.1
     weight_decay: float = 5e-4
