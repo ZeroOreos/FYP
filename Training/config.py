@@ -61,6 +61,9 @@ class EnsembleTrainingConfig:
     embedding_dim: int = 256
     image_size: int = 112
     num_workers: int = 2
+    persistent_workers: bool = True
+    prefetch_factor: int = 4
+    pin_memory: bool = True
     clean_weight: float = 1.0
     adv_weight: float = 1.0
     consistency_weight: float = 0.1
@@ -79,11 +82,16 @@ class EnsembleTrainingConfig:
     verification_eval_every_epochs: int = 1
     clean_only: bool = False
     use_mixed_precision: bool = True
+    mixed_precision_dtype: str = "auto"
     use_gradient_checkpointing: bool = True
     use_distributed: bool = True
     distributed_backend: str = "nccl"
     use_sync_batchnorm: bool = True
+    ddp_gradient_as_bucket_view: bool = True
+    ddp_static_graph: bool = False
     optimizer_name: str = "sgd"
+    optimizer_foreach: bool | None = True
+    optimizer_fused: bool | None = None
     momentum: float = 0.9
     lr_milestones: list[int] = field(default_factory=lambda: [8, 12, 16])
     lr_gamma: float = 0.1
@@ -131,6 +139,12 @@ class EnsembleTrainingConfig:
     shallow_attack_step_scale: float = 0.5
     shallow_attack_restart_cap: int = 1
     shallow_attack_names: list[str] = field(default_factory=lambda: ["pgd", "bpfa"])
+    enable_tf32: bool = True
+    float32_matmul_precision: str = "high"
+    use_channels_last: bool = True
+    use_torch_compile: bool = False
+    torch_compile_backend: str = "inductor"
+    torch_compile_mode: str = "max-autotune-no-cudagraphs"
     primary_attackers: list[AttackPolicy] = field(default_factory=list)
     surrogate_attackers: list[AttackPolicy] = field(default_factory=list)
 

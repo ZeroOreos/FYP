@@ -143,6 +143,17 @@ class MarginTarget(nn.Module):
         embeddings = self.forward_embeddings(images)
         return self.predict_logits_from_embeddings(embeddings)
 
+    def forward(self, images: torch.Tensor, labels: torch.Tensor) -> dict[str, torch.Tensor | None]:
+        embeddings = self.forward_embeddings(images)
+        logits = self.margin(embeddings, labels)
+        predict_logits = self.predict_logits_from_embeddings(embeddings)
+        return {
+            "logits": logits,
+            "embeddings": embeddings,
+            "predict_logits": predict_logits,
+            "member_outputs": None,
+        }
+
 
 class ArcFaceTarget(MarginTarget):
     def __init__(
@@ -385,6 +396,31 @@ class JointRecognizerPool(nn.Module):
     def predict_logits(self, images: torch.Tensor) -> torch.Tensor:
         embeddings = self.forward_embeddings(images)
         return self.predict_logits_from_embeddings(embeddings)
+
+    def forward(
+        self,
+        images: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> dict[str, torch.Tensor | dict[str, dict[str, torch.Tensor]]]:
+        member_outputs = self.forward_member_outputs(images, labels)
+        pooled_logits = sum(
+            self.member_weights[name] * member_outputs[name]["logits"]
+            for name in self.member_names
+        )
+        pooled_embeddings = torch.cat(
+            [member_outputs[name]["embeddings"] for name in self.member_names],
+            dim=1,
+        )
+        pooled_predict_logits = sum(
+            self.member_weights[name] * member_outputs[name]["predict_logits"]
+            for name in self.member_names
+        )
+        return {
+            "logits": pooled_logits,
+            "embeddings": pooled_embeddings,
+            "predict_logits": pooled_predict_logits,
+            "member_outputs": member_outputs,
+        }
 
 
 def build_target_model(

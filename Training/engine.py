@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import gc
 import hashlib
+import inspect
 import json
 import os
 import random
@@ -25,7 +26,7 @@ from Training.attacks import build_attack_policy_sampler, generate_attack_batch
 from Training.config import EnsembleTrainingConfig, save_config_snapshot
 from Training.dataset import build_dataloaders, build_eval_loader
 from Training.evaluate import choose_eval_policy, evaluate_clean, evaluate_robust, evaluate_robust_all, evaluate_verification_pairs
-from Training.losses import classification_accuracy, embedding_consistency_loss
+from Training.losses import classification_accuracy, classification_accuracy_tensor, embedding_consistency_loss
 from Training.pairing import HardPairMiningResult, mine_hard_pairs
 from Training.recognizers import build_surrogates, build_target_model
 
@@ -76,12 +77,26 @@ def maybe_init_distributed(config: EnsembleTrainingConfig) -> bool:
     return True
 
 
-def maybe_wrap_ddp(model: torch.nn.Module, device: torch.device, use_distributed: bool):
+def maybe_wrap_ddp(
+    model: torch.nn.Module,
+    device: torch.device,
+    config: EnsembleTrainingConfig,
+    use_distributed: bool,
+):
     if not use_distributed:
         return model
+    ddp_kwargs = {
+        "gradient_as_bucket_view": bool(config.ddp_gradient_as_bucket_view),
+    }
+    if "static_graph" in inspect.signature(DistributedDataParallel).parameters:
+        ddp_kwargs["static_graph"] = bool(config.ddp_static_graph)
     if device.type == "cuda":
-        return DistributedDataParallel(model, device_ids=[torch.cuda.current_device()])
-    return DistributedDataParallel(model)
+        return DistributedDataParallel(
+            model,
+            device_ids=[torch.cuda.current_device()],
+            **ddp_kwargs,
+        )
+    return DistributedDataParallel(model, **ddp_kwargs)
 
 
 def _unwrap_model(model):
@@ -89,18 +104,30 @@ def _unwrap_model(model):
 
 
 def _make_optimizer(config: EnsembleTrainingConfig, model: torch.nn.Module):
+    optimizer_kwargs: dict[str, object] = {}
+    if config.optimizer_foreach is not None:
+        optimizer_kwargs["foreach"] = bool(config.optimizer_foreach)
+    if config.optimizer_fused is not None:
+        optimizer_kwargs["fused"] = bool(config.optimizer_fused)
+
     if config.optimizer_name.lower() == "sgd":
+        signature = inspect.signature(torch.optim.SGD)
+        filtered_kwargs = {key: value for key, value in optimizer_kwargs.items() if key in signature.parameters}
         return torch.optim.SGD(
             model.parameters(),
             lr=config.learning_rate,
             momentum=config.momentum,
             weight_decay=config.weight_decay,
+            **filtered_kwargs,
         )
     if config.optimizer_name.lower() == "adamw":
+        signature = inspect.signature(torch.optim.AdamW)
+        filtered_kwargs = {key: value for key, value in optimizer_kwargs.items() if key in signature.parameters}
         return torch.optim.AdamW(
             model.parameters(),
             lr=config.learning_rate,
             weight_decay=config.weight_decay,
+            **filtered_kwargs,
         )
     raise ValueError(f"Unsupported optimizer '{config.optimizer_name}'.")
 
@@ -117,10 +144,35 @@ def _autocast_context(config: EnsembleTrainingConfig, device: torch.device):
     if not config.use_mixed_precision:
         return contextlib.nullcontext()
     if device.type == "cuda":
-        return torch.autocast(device_type="cuda", dtype=torch.float16)
+        dtype = _resolve_mixed_precision_dtype(config, device)
+        if dtype is None:
+            return contextlib.nullcontext()
+        return torch.autocast(device_type="cuda", dtype=dtype)
     if device.type == "cpu":
         return torch.autocast(device_type="cpu", dtype=torch.bfloat16)
     return contextlib.nullcontext()
+
+
+def _resolve_mixed_precision_dtype(
+    config: EnsembleTrainingConfig,
+    device: torch.device,
+) -> torch.dtype | None:
+    if not config.use_mixed_precision:
+        return None
+    choice = config.mixed_precision_dtype.strip().lower()
+    if device.type == "cuda":
+        if choice == "fp16":
+            return torch.float16
+        if choice == "bf16":
+            return torch.bfloat16
+        if choice == "auto":
+            if hasattr(torch.cuda, "is_bf16_supported") and torch.cuda.is_bf16_supported():
+                return torch.bfloat16
+            return torch.float16
+        raise ValueError(f"Unsupported mixed_precision_dtype '{config.mixed_precision_dtype}'.")
+    if device.type == "cpu":
+        return torch.bfloat16
+    return None
 
 
 def _save_checkpoint(output_dir: Path, epoch: int, model, optimizer, scheduler, scaler, history: list[dict]) -> Path:
@@ -413,15 +465,15 @@ def _average_member_consistency(
     model: Any,
     clean_member_outputs: dict[str, dict[str, torch.Tensor]],
     adv_member_outputs: dict[str, dict[str, torch.Tensor]],
-) -> tuple[torch.Tensor, dict[str, float]]:
-    per_member: dict[str, float] = {}
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    per_member: dict[str, torch.Tensor] = {}
     consistency_terms = []
     weights = _joint_member_weights(model, clean_member_outputs)
     for name, clean_item in clean_member_outputs.items():
         adv_item = adv_member_outputs[name]
         value = embedding_consistency_loss(clean_item["embeddings"], adv_item["embeddings"])
         consistency_terms.append(weights[name] * value)
-        per_member[name] = float(value.item())
+        per_member[name] = value.detach()
     if not consistency_terms:
         zero = torch.zeros((), device=next(iter(clean_member_outputs.values()))["embeddings"].device)
         return zero, per_member
@@ -429,27 +481,49 @@ def _average_member_consistency(
 
 
 def _accumulate_member_epoch_metric(
-    totals: dict[str, dict[str, dict[str, float]]],
+    totals: dict[str, dict[str, dict[str, torch.Tensor | float]]],
     *,
     name: str,
     key: str,
-    value: float,
+    value: torch.Tensor | float,
 ) -> None:
     member_bucket = totals.setdefault(name, {})
+    if isinstance(value, torch.Tensor):
+        detached_value = value.detach()
+        metric_bucket = member_bucket.setdefault(
+            key,
+            {
+                "sum": torch.zeros((), device=detached_value.device, dtype=detached_value.dtype),
+                "count": torch.zeros((), device=detached_value.device, dtype=detached_value.dtype),
+            },
+        )
+        metric_bucket["sum"] = metric_bucket["sum"] + detached_value
+        metric_bucket["count"] = metric_bucket["count"] + torch.ones(
+            (),
+            device=detached_value.device,
+            dtype=detached_value.dtype,
+        )
+        return
     metric_bucket = member_bucket.setdefault(key, {"sum": 0.0, "count": 0.0})
     metric_bucket["sum"] += float(value)
     metric_bucket["count"] += 1.0
 
 
 def _finalize_member_epoch_metrics(
-    totals: dict[str, dict[str, dict[str, float]]],
+    totals: dict[str, dict[str, dict[str, torch.Tensor | float]]],
 ) -> dict[str, dict[str, float]]:
     finalized: dict[str, dict[str, float]] = {}
     for name, metrics in totals.items():
         finalized[name] = {}
         for key, bucket in metrics.items():
-            count = max(1.0, bucket["count"])
-            finalized[name][key] = bucket["sum"] / count
+            bucket_sum = bucket["sum"]
+            bucket_count = bucket["count"]
+            if isinstance(bucket_sum, torch.Tensor):
+                count = float(max(1.0, float(bucket_count.item())))
+                finalized[name][key] = float(bucket_sum.item()) / count
+            else:
+                count = max(1.0, bucket_count)
+                finalized[name][key] = bucket_sum / count
     return finalized
 
 
@@ -559,6 +633,72 @@ def _reset_cuda_peak_memory(device: torch.device) -> None:
     torch.cuda.reset_peak_memory_stats(index)
 
 
+def _configure_cuda_runtime(config: EnsembleTrainingConfig, device: torch.device) -> None:
+    if device.type != "cuda" or not torch.cuda.is_available():
+        return
+    torch.backends.cuda.matmul.allow_tf32 = bool(config.enable_tf32)
+    torch.backends.cudnn.allow_tf32 = bool(config.enable_tf32)
+    if hasattr(torch, "set_float32_matmul_precision"):
+        torch.set_float32_matmul_precision(config.float32_matmul_precision)
+    torch.backends.cudnn.benchmark = True
+
+
+def _maybe_enable_channels_last(
+    model: torch.nn.Module,
+    config: EnsembleTrainingConfig,
+    device: torch.device,
+) -> torch.nn.Module:
+    if device.type != "cuda" or not config.use_channels_last:
+        return model
+    return model.to(memory_format=torch.channels_last)
+
+
+def _maybe_channels_last_tensor(
+    tensor: torch.Tensor,
+    config: EnsembleTrainingConfig,
+    device: torch.device,
+) -> torch.Tensor:
+    if device.type != "cuda" or not config.use_channels_last or tensor.ndim != 4:
+        return tensor
+    return tensor.contiguous(memory_format=torch.channels_last)
+
+
+def _maybe_compile_model(
+    model: torch.nn.Module,
+    config: EnsembleTrainingConfig,
+) -> torch.nn.Module:
+    if not config.use_torch_compile:
+        return model
+    if not hasattr(torch, "compile"):
+        raise RuntimeError("torch.compile requested, but this PyTorch build does not expose torch.compile.")
+    return torch.compile(
+        model,
+        backend=config.torch_compile_backend,
+        mode=config.torch_compile_mode,
+    )
+
+
+def _reduce_mean_in_place(tensor: torch.Tensor, enabled: bool) -> torch.Tensor:
+    if enabled and dist.is_initialized():
+        dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+        tensor.div_(dist.get_world_size())
+    return tensor
+
+
+def _reduce_member_metric_totals(
+    totals: dict[str, dict[str, dict[str, torch.Tensor | float]]],
+    enabled: bool,
+) -> None:
+    if not enabled or not dist.is_initialized():
+        return
+    for metrics in totals.values():
+        for bucket in metrics.values():
+            for key in ("sum", "count"):
+                value = bucket[key]
+                if isinstance(value, torch.Tensor):
+                    dist.all_reduce(value, op=dist.ReduceOp.SUM)
+
+
 def _is_cuda_oom(exc: RuntimeError) -> bool:
     message = str(exc).lower()
     return "out of memory" in message and "cuda" in message
@@ -638,6 +778,9 @@ def _raise_batch_runtime_error(
 def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
     set_seed(config.seed + _rank())
     distributed = maybe_init_distributed(config)
+    device_name = config.device
+    if device_name == "auto" and distributed and torch.cuda.is_available():
+        device_name = "cuda"
 
     output_dir = config.resolved_output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -656,6 +799,9 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
         dataset_fraction=config.dataset_fraction,
         dataset_subset_seed=config.dataset_subset_seed,
         dataset_min_images_per_identity=config.dataset_min_images_per_identity,
+        persistent_workers=config.persistent_workers,
+        prefetch_factor=config.prefetch_factor,
+        pin_memory=config.pin_memory,
     )
     test_loader = None
     if config.resolved_test_dir() is not None:
@@ -665,13 +811,16 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
             image_size=config.image_size,
             batch_size=config.batch_size,
             num_workers=config.num_workers,
+            persistent_workers=config.persistent_workers,
+            prefetch_factor=config.prefetch_factor,
+            pin_memory=config.pin_memory,
         )
 
     base_model, device = build_target_model(
         model_name=config.target_model,
         num_classes=len(class_to_idx),
         embedding_dim=config.embedding_dim,
-        device_name=config.device,
+        device_name=device_name,
         backbone_name=config.target_backbone,
         use_gradient_checkpointing=config.use_gradient_checkpointing,
         arcface_scale=config.arcface_scale,
@@ -682,14 +831,21 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
         dropout_p=config.dropout_p,
         member_weights=config.joint_pool_member_weights,
     )
+    _configure_cuda_runtime(config, device)
     if distributed and config.use_sync_batchnorm and device.type == "cuda":
         base_model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(base_model)
+    base_model = _maybe_enable_channels_last(base_model, config, device)
+    base_model = _maybe_compile_model(base_model, config)
     surrogates = build_surrogates(config.surrogate_models, base_model, device)
-    model = maybe_wrap_ddp(base_model, device, distributed)
+    model = maybe_wrap_ddp(base_model, device, config, distributed)
 
     optimizer = _make_optimizer(config, model)
     scheduler = _make_scheduler(config, optimizer)
-    scaler = torch.amp.GradScaler("cuda", enabled=config.use_mixed_precision and device.type == "cuda")
+    amp_dtype = _resolve_mixed_precision_dtype(config, device)
+    scaler = torch.amp.GradScaler(
+        "cuda",
+        enabled=config.use_mixed_precision and device.type == "cuda" and amp_dtype == torch.float16,
+    )
 
     rng = random.Random(config.seed)
     eval_policy = choose_eval_policy(config.all_attackers(), config.eval_attack_name)
@@ -725,7 +881,11 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
             f"verify={config.verification_eval_every_epochs}"
         )
         logger.info(f"[INFO] AMP:           {config.use_mixed_precision}")
+        logger.info(f"[INFO] AMP dtype:     {config.mixed_precision_dtype} -> {amp_dtype}")
         logger.info(f"[INFO] Checkpointing: {config.use_gradient_checkpointing}")
+        logger.info(f"[INFO] Channels last: {config.use_channels_last}")
+        logger.info(f"[INFO] TF32:          {config.enable_tf32}")
+        logger.info(f"[INFO] Compile:       {config.use_torch_compile}")
         logger.info(f"[INFO] Distributed:   requested={config.use_distributed} world_size={_world_size()}")
         logger.info(f"[INFO] Primary atk:   {[policy.name for policy in config.enabled_primary_attackers()]}")
         logger.info(f"[INFO] Surrogate atk: {[policy.name for policy in config.enabled_surrogate_attackers()]}")
@@ -755,15 +915,15 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
         if distributed and isinstance(train_loader.sampler, DistributedSampler):
             train_loader.sampler.set_epoch(epoch)
 
-        train_loss = 0.0
-        train_acc = 0.0
-        train_consistency = 0.0
-        train_cached_hits = 0.0
-        train_hard_pair_count = 0.0
-        train_hard_sample_count = 0.0
-        train_hard_pair_hardness = 0.0
-        train_hard_loss = 0.0
-        train_member_metrics_totals: dict[str, dict[str, dict[str, float]]] = {}
+        train_loss = torch.zeros((), device=device)
+        train_acc = torch.zeros((), device=device)
+        train_consistency = torch.zeros((), device=device)
+        train_cached_hits = torch.zeros((), device=device)
+        train_hard_pair_count = torch.zeros((), device=device)
+        train_hard_sample_count = torch.zeros((), device=device)
+        train_hard_pair_hardness = torch.zeros((), device=device)
+        train_hard_loss = torch.zeros((), device=device)
+        train_member_metrics_totals: dict[str, dict[str, dict[str, torch.Tensor | float]]] = {}
         batches = 0
 
         total_batches = max(1, len(train_loader))
@@ -807,13 +967,16 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
             try:
                 images = images.to(device, non_blocking=device.type == "cuda")
                 labels = labels.to(device, non_blocking=device.type == "cuda")
+                images = _maybe_channels_last_tensor(images, config, device)
                 optimizer.zero_grad(set_to_none=True)
                 train_model = _unwrap_model(model)
 
                 with _autocast_context(config, device):
-                    clean_logits, clean_embeddings = train_model.forward_logits(images, labels)
-                    clean_predict_logits = train_model.predict_logits_from_embeddings(clean_embeddings)
-                    clean_member_outputs = _joint_member_outputs(train_model, images, labels)
+                    clean_outputs = model(images, labels)
+                    clean_logits = clean_outputs["logits"]
+                    clean_embeddings = clean_outputs["embeddings"]
+                    clean_predict_logits = clean_outputs["predict_logits"]
+                    clean_member_outputs = clean_outputs["member_outputs"]
                     if clean_member_outputs is None:
                         clean_loss_per_sample = F.cross_entropy(clean_logits, labels, reduction="none")
                         clean_loss = clean_loss_per_sample.mean()
@@ -825,13 +988,13 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                                 train_member_metrics_totals,
                                 name=name,
                                 key="clean_loss",
-                                value=float(item["loss"].item()),
+                                value=item["loss"],
                             )
                             _accumulate_member_epoch_metric(
                                 train_member_metrics_totals,
                                 name=name,
                                 key="clean_accuracy",
-                                value=classification_accuracy(item["predict_logits"].detach(), labels),
+                                value=classification_accuracy_tensor(item["predict_logits"].detach(), labels),
                             )
                     hard_pairs = _mine_batch_hard_pairs(
                         config=config,
@@ -868,8 +1031,11 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                             surrogates=surrogates,
                             device=device,
                         )
-                        adv_logits, adv_embeddings = train_model.forward_logits(attack_result.images, adv_labels)
-                        adv_member_outputs = _joint_member_outputs(train_model, attack_result.images, adv_labels)
+                        attack_images = _maybe_channels_last_tensor(attack_result.images, config, device)
+                        adv_outputs = model(attack_images, adv_labels)
+                        adv_logits = adv_outputs["logits"]
+                        adv_embeddings = adv_outputs["embeddings"]
+                        adv_member_outputs = adv_outputs["member_outputs"]
                         if adv_member_outputs is None:
                             adv_loss_per_sample = F.cross_entropy(adv_logits, adv_labels, reduction="none")
                             adv_loss = adv_loss_per_sample.mean()
@@ -893,19 +1059,19 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                                     train_member_metrics_totals,
                                     name=name,
                                     key="adv_loss",
-                                    value=float(item["loss"].item()),
+                                    value=item["loss"],
                                 )
                                 _accumulate_member_epoch_metric(
                                     train_member_metrics_totals,
                                     name=name,
                                     key="adv_accuracy",
-                                    value=classification_accuracy(item["predict_logits"].detach(), adv_labels),
+                                    value=classification_accuracy_tensor(item["predict_logits"].detach(), adv_labels),
                                 )
                                 _accumulate_member_epoch_metric(
                                     train_member_metrics_totals,
                                     name=name,
                                     key="consistency",
-                                    value=per_member_consistency.get(name, 0.0),
+                                    value=per_member_consistency.get(name, torch.zeros((), device=device)),
                                 )
 
                     hard_loss = torch.zeros((), device=device)
@@ -946,28 +1112,36 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                     batch_index=batch_index,
                 )
 
-            train_loss += float(loss.item())
-            train_acc += classification_accuracy(clean_predict_logits.detach(), labels)
-            train_consistency += float(consistency.item())
-            train_cached_hits += float(0 if attack_result is None else attack_result.cached_hits)
-            train_hard_pair_count += float(hard_pairs.pair_count)
-            train_hard_sample_count += float(hard_pairs.hard_sample_count)
-            train_hard_pair_hardness += float(hard_pairs.mean_hardness)
-            train_hard_loss += float(hard_loss.item())
+            train_loss += loss.detach()
+            train_acc += classification_accuracy_tensor(clean_predict_logits.detach(), labels)
+            train_consistency += consistency.detach()
+            train_cached_hits += torch.tensor(
+                float(0 if attack_result is None else attack_result.cached_hits),
+                device=device,
+            )
+            train_hard_pair_count += torch.tensor(float(hard_pairs.pair_count), device=device)
+            train_hard_sample_count += torch.tensor(float(hard_pairs.hard_sample_count), device=device)
+            train_hard_pair_hardness += torch.tensor(float(hard_pairs.mean_hardness), device=device)
+            train_hard_loss += hard_loss.detach()
             batches += 1
             samples_seen += int(labels.numel())
             if train_progress is not None:
-                postfix = {
-                    "loss": f"{train_loss / batches:.4f}",
-                    "acc": f"{train_acc / batches:.4f}",
-                    "stage": str(schedule.get("stage_name", "na")),
-                    "atk": "on" if bool(schedule["attacks_enabled"]) else "off",
-                    "step": f"{batch_index}/{total_batches}",
-                }
-                if attack_result is not None:
-                    postfix["policy"] = attack_result.policy_name
-                train_progress.set_postfix(postfix, refresh=False)
                 train_progress.update(int(labels.numel()))
+                should_refresh_progress = (
+                    config.log_every_batches > 0
+                    and (batch_index % config.log_every_batches == 0 or batch_index == total_batches)
+                )
+                if should_refresh_progress:
+                    postfix = {
+                        "loss": f"{float((train_loss / max(1, batches)).item()):.4f}",
+                        "acc": f"{float((train_acc / max(1, batches)).item()):.4f}",
+                        "stage": str(schedule.get("stage_name", "na")),
+                        "atk": "on" if bool(schedule["attacks_enabled"]) else "off",
+                        "step": f"{batch_index}/{total_batches}",
+                    }
+                    if attack_result is not None:
+                        postfix["policy"] = attack_result.policy_name
+                    train_progress.set_postfix(postfix, refresh=False)
             if _is_primary() and config.log_every_batches > 0 and (
                 batch_index % config.log_every_batches == 0 or batch_index == total_batches
             ):
@@ -976,8 +1150,8 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                     f" epoch={epoch}/{config.epochs}"
                     f" step={batch_index}/{total_batches}"
                     f" seen={samples_seen}/{total_train_samples}"
-                    f" loss={train_loss / batches:.4f}"
-                    f" acc={train_acc / batches:.4f}"
+                    f" loss={float((train_loss / max(1, batches)).item()):.4f}"
+                    f" acc={float((train_acc / max(1, batches)).item()):.4f}"
                     f" stage={schedule.get('stage_name', 'na')}"
                     f" attacks={'on' if bool(schedule['attacks_enabled']) else 'off'}"
                 )
@@ -989,6 +1163,16 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
 
         if batches > 0:
             scheduler.step()
+
+        _reduce_mean_in_place(train_loss, distributed)
+        _reduce_mean_in_place(train_acc, distributed)
+        _reduce_mean_in_place(train_consistency, distributed)
+        _reduce_mean_in_place(train_cached_hits, distributed)
+        _reduce_mean_in_place(train_hard_pair_count, distributed)
+        _reduce_mean_in_place(train_hard_sample_count, distributed)
+        _reduce_mean_in_place(train_hard_pair_hardness, distributed)
+        _reduce_mean_in_place(train_hard_loss, distributed)
+        _reduce_member_metric_totals(train_member_metrics_totals, distributed)
 
         run_clean_eval = _should_run_eval(epoch, config.epochs, config.clean_eval_every_epochs)
         run_robust_eval = (
@@ -1007,76 +1191,79 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
         )
 
         clean_metrics = {"skipped": True}
-        if run_clean_eval:
-            clean_metrics = evaluate_clean(
-                _unwrap_model(model),
-                val_loader,
-                device,
-                progress_desc=f"Val clean {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]" if _is_primary() else None,
-            )
-
         robust_metrics = {"skipped": True}
         robust_by_attack = None
-        if run_full_robust_eval:
-            robust_eval = evaluate_robust_all(
-                model=_unwrap_model(model),
-                loader=val_loader,
-                device=device,
-                policies=config.all_attackers(),
-                surrogates=surrogates,
-                image_size=config.image_size,
-                progress_prefix=f"Val robust {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]" if _is_primary() else None,
-            )
-            robust_metrics = robust_eval["average"]
-            robust_by_attack = robust_eval["by_attack"]
-        elif run_robust_eval:
-            robust_metrics = evaluate_robust(
-                model=_unwrap_model(model),
-                loader=val_loader,
-                device=device,
-                policy=eval_policy,
-                surrogates=surrogates,
-                image_size=config.image_size,
-                progress_desc=f"Val robust {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]" if _is_primary() else None,
-            )
-
         verification_metrics = None
-        if run_verification_eval:
-            verification_metrics = evaluate_verification_pairs(
-                model=_unwrap_model(model),
-                pairs_path=Path(config.val_pairs_path).resolve(),
-                device=device,
-            )
         test_clean_metrics = None
         test_verification_metrics = None
-        if test_loader is not None and run_clean_eval:
-            test_clean_metrics = evaluate_clean(
-                _unwrap_model(model),
-                test_loader,
-                device,
-                progress_desc=f"Test clean {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]" if _is_primary() else None,
-            )
-        if config.test_pairs_path is not None:
-            test_verification_metrics = evaluate_verification_pairs(
-                model=_unwrap_model(model),
-                pairs_path=Path(config.test_pairs_path).resolve(),
-                device=device,
-            )
+        if _is_primary():
+            if run_clean_eval:
+                clean_metrics = evaluate_clean(
+                    _unwrap_model(model),
+                    val_loader,
+                    device,
+                    progress_desc=f"Val clean {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]",
+                )
+
+            if run_full_robust_eval:
+                robust_eval = evaluate_robust_all(
+                    model=_unwrap_model(model),
+                    loader=val_loader,
+                    device=device,
+                    policies=config.all_attackers(),
+                    surrogates=surrogates,
+                    image_size=config.image_size,
+                    progress_prefix=f"Val robust {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]",
+                )
+                robust_metrics = robust_eval["average"]
+                robust_by_attack = robust_eval["by_attack"]
+            elif run_robust_eval:
+                robust_metrics = evaluate_robust(
+                    model=_unwrap_model(model),
+                    loader=val_loader,
+                    device=device,
+                    policy=eval_policy,
+                    surrogates=surrogates,
+                    image_size=config.image_size,
+                    progress_desc=f"Val robust {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]",
+                )
+
+            if run_verification_eval:
+                verification_metrics = evaluate_verification_pairs(
+                    model=_unwrap_model(model),
+                    pairs_path=Path(config.val_pairs_path).resolve(),
+                    device=device,
+                )
+            if test_loader is not None and run_clean_eval:
+                test_clean_metrics = evaluate_clean(
+                    _unwrap_model(model),
+                    test_loader,
+                    device,
+                    progress_desc=f"Test clean {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]",
+                )
+            if config.test_pairs_path is not None:
+                test_verification_metrics = evaluate_verification_pairs(
+                    model=_unwrap_model(model),
+                    pairs_path=Path(config.test_pairs_path).resolve(),
+                    device=device,
+                )
         _clear_device_caches(device)
         if _is_primary() and device.type == "cuda":
             logger.info(f"[CUDA] epoch={epoch}/{config.epochs} post-eval {_format_cuda_memory_stats(device)}")
+        if distributed and dist.is_initialized():
+            dist.barrier()
 
         epoch_record = {
             "epoch": epoch,
             "lr": optimizer.param_groups[0]["lr"],
-            "train_loss": train_loss / max(1, batches),
-            "train_accuracy": train_acc / max(1, batches),
-            "train_consistency": train_consistency / max(1, batches),
-            "train_cached_hits": train_cached_hits / max(1, batches),
-            "train_hard_pair_count": train_hard_pair_count / max(1, batches),
-            "train_hard_sample_count": train_hard_sample_count / max(1, batches),
-            "train_hard_pair_hardness": train_hard_pair_hardness / max(1, batches),
-            "train_hard_loss": train_hard_loss / max(1, batches),
+            "train_loss": float((train_loss / max(1, batches)).item()),
+            "train_accuracy": float((train_acc / max(1, batches)).item()),
+            "train_consistency": float((train_consistency / max(1, batches)).item()),
+            "train_cached_hits": float((train_cached_hits / max(1, batches)).item()),
+            "train_hard_pair_count": float((train_hard_pair_count / max(1, batches)).item()),
+            "train_hard_sample_count": float((train_hard_sample_count / max(1, batches)).item()),
+            "train_hard_pair_hardness": float((train_hard_pair_hardness / max(1, batches)).item()),
+            "train_hard_loss": float((train_hard_loss / max(1, batches)).item()),
             "curriculum_progress": schedule["progress"],
             "training_stage": schedule.get("stage_name", "unknown"),
             "epoch_clean_fraction": schedule["clean_fraction"],
@@ -1118,7 +1305,7 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                 )
                 logger.info(f"[MEMBERS] epoch={epoch}/{config.epochs} {compact}")
 
-            if epoch % max(1, config.checkpoint_every) == 0:
+            if config.checkpoint_every > 0 and epoch % config.checkpoint_every == 0:
                 checkpoint_path = _save_checkpoint(output_dir, epoch, model, optimizer, scheduler, scaler, history)
                 logger.info(f"[INFO] Saved checkpoint: {checkpoint_path}")
 

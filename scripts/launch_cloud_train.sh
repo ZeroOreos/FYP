@@ -16,6 +16,10 @@ RUN_NAME=${2:-}
 RENDERED_DIR=${FYP_RENDERED_CONFIG_ROOT:-"$PROJECT_ROOT/Training/generated"}
 USE_TORCHRUN=${USE_TORCHRUN:-0}
 NPROC_PER_NODE=${NPROC_PER_NODE:-1}
+NNODES=${NNODES:-1}
+NODE_RANK=${NODE_RANK:-0}
+MASTER_ADDR=${MASTER_ADDR:-127.0.0.1}
+MASTER_PORT=${MASTER_PORT:-29500}
 
 mkdir -p "$RENDERED_DIR"
 
@@ -46,7 +50,22 @@ echo "[INFO] rendered_config=$RENDERED_CONFIG"
 echo "[INFO] run_dir=$RUN_DIR"
 
 if [ "$USE_TORCHRUN" = "1" ]; then
-  torchrun --nproc_per_node="$NPROC_PER_NODE" "$PROJECT_ROOT/main_train_ensemble.py" --config "$RENDERED_CONFIG"
+  if [ "$NNODES" = "1" ]; then
+    torchrun \
+      --standalone \
+      --nproc_per_node="$NPROC_PER_NODE" \
+      "$PROJECT_ROOT/main_train_ensemble.py" \
+      --config "$RENDERED_CONFIG"
+  else
+    torchrun \
+      --nnodes="$NNODES" \
+      --node_rank="$NODE_RANK" \
+      --nproc_per_node="$NPROC_PER_NODE" \
+      --master_addr="$MASTER_ADDR" \
+      --master_port="$MASTER_PORT" \
+      "$PROJECT_ROOT/main_train_ensemble.py" \
+      --config "$RENDERED_CONFIG"
+  fi
 else
   python3 "$PROJECT_ROOT/main_train_ensemble.py" --config "$RENDERED_CONFIG"
 fi

@@ -412,6 +412,9 @@ def build_dataloaders(
     dataset_fraction: float = 1.0,
     dataset_subset_seed: int = 42,
     dataset_min_images_per_identity: int = 2,
+    persistent_workers: bool = True,
+    prefetch_factor: int = 4,
+    pin_memory: bool = True,
 ) -> tuple[Dataset, Dataset, DataLoader, DataLoader, dict[str, int]]:
     train_grouped = _collect_label_rel_paths(train_dir)
     val_grouped = _collect_label_rel_paths(val_dir)
@@ -447,21 +450,27 @@ def build_dataloaders(
         train_sampler = ShardAwareSampler(train_ds, seed=dataset_subset_seed)
         train_shuffle = False
 
+    loader_kwargs: dict[str, object] = {
+        "num_workers": num_workers,
+        "pin_memory": pin_memory and torch.cuda.is_available(),
+    }
+    if num_workers > 0:
+        loader_kwargs["persistent_workers"] = persistent_workers
+        loader_kwargs["prefetch_factor"] = max(2, int(prefetch_factor))
+
     train_loader = DataLoader(
         train_ds,
         batch_size=batch_size,
         shuffle=train_shuffle,
         sampler=train_sampler,
         drop_last=True,
-        num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
+        **loader_kwargs,
     )
     val_loader = DataLoader(
         val_ds,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
+        **loader_kwargs,
     )
     return train_ds, val_ds, train_loader, val_loader, class_to_idx
 
@@ -472,6 +481,9 @@ def build_eval_loader(
     image_size: int,
     batch_size: int,
     num_workers: int,
+    persistent_workers: bool = True,
+    prefetch_factor: int = 4,
+    pin_memory: bool = True,
 ) -> tuple[Dataset, DataLoader]:
     dataset = _build_dataset(
         data_dir,
@@ -479,11 +491,18 @@ def build_eval_loader(
         image_size,
         subset_plan=DatasetSubsetPlan(selected_labels=tuple(class_to_idx)),
     )
+    loader_kwargs: dict[str, object] = {
+        "num_workers": num_workers,
+        "pin_memory": pin_memory and torch.cuda.is_available(),
+    }
+    if num_workers > 0:
+        loader_kwargs["persistent_workers"] = persistent_workers
+        loader_kwargs["prefetch_factor"] = max(2, int(prefetch_factor))
+
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
+        **loader_kwargs,
     )
     return dataset, loader
