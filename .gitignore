@@ -1,28 +1,53 @@
-# OS and editor clutter
+# OS, editor, and shell clutter
 .DS_Store
 .vscode/
+.idea/
+.cursor/
 
-# Local Python environments and caches
+# Environment files and local Python tooling
+.env
+.env.*
 .venv/
+venv/
+ENV/
+env/
+.python-version
+*.egg-info/
+pip-wheel-metadata/
+
+# Python caches and test artifacts
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
 
-# Local datasets and generated dataset artifacts
-Dataset/WebFace4M/raw/
-Dataset/WebFace4M/manifests/
-Dataset/WebFace4M/subset_manifests/
-Dataset/WebFace42M/raw/
+# Dataset downloads and generated dataset artifacts
+Dataset/**/raw/
+Dataset/**/manifests/
+Dataset/**/subset_manifests/
 Dataset/pairs/*.npz
 Dataset/pairs/*.npy
 
-# Local training outputs
+# Server-local runs, exports, logs, and scratch space
 TrainingRuns/
 Results/
+runs/
 tmp/
+*.log
+*.out
+*.err
+*.pid
+*.tar
+*.tar.gz
+*.zip
 
-# Local backend assets, workdirs, and vendored upstream checkouts
+# Local backend assets, workdirs, and upstream checkouts
 Backends/assets/
 Backends/workdirs/
 Backends/sources/
