@@ -249,7 +249,7 @@ def load_pair_rows(pair_input: Path) -> list[dict[str, str]]:
 
 
 def build_output_path(output_dir: Path, row: dict[str, str]) -> Path:
-    return output_dir / row["victim_identity"] / Path(row["attacker_image"]).name
+    return output_dir / row["victim_identity"] / Path(row["victim_image"]).name
 
 
 def make_record(

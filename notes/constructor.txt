@@ -1,0 +1,168 @@
+FYP constructor
+
+Goal
+- Build an adversarial recognizer-training system for face recognition, not a generic manipulated-face generator ensemble.
+- Build this repo as the full and final model-training repo, not as a temporary prototype repo.
+- Treat the project as a two-level ensemble: recognizer ensemble plus attacker ensemble.
+- Use the strongest research-backed recipe that is still practical in this repo without overstating what the literature has already standardized.
+- Test one blunt question: does attack-pool diversity beat strongest-single-attack training.
+- Test one second question: how should recognizer ensembles be used productively instead of cosmetically.
+
+Paper position
+- This is a recognizer-hardening project.
+- This is an ensemble-aware recognizer-training and evaluation project.
+- It is not a detector paper.
+- It is not a backend collection paper.
+- It is not a generic adversarial-training paper with face data swapped in.
+- Do not claim a mature face-recognition standard for full joint attack-plus-recognizer co-training; that exact recipe is still underexplored.
+- Files under `notes/reports/` are downstream report documents only.
+- Reports base themselves on the repo; the repo must not be reinterpreted to match a stale report draft.
+- When report wording conflicts with code, configs, run outputs, or these core notes, update the report and keep the repo-side source of truth unchanged.
+
+Research anchors
+- `ArcFace` is still the main baseline margin-loss line.
+- `CosFace` is a foundational additive-margin baseline that makes the paper comparisons easy to justify.
+- `CurricularFace` is a logical third recognizer because it extends the same margin-loss family with curriculum-style hardness control.
+- `PGD` is the logical white-box optimization anchor.
+- `BPFA` is the logical modern transfer-attack anchor.
+- `DFANet` is the logical FR-specific feature-level attack anchor.
+- Madry-style robust optimization is the right anchor for the defended recognizer update rule.
+- Tramer-style ensemble adversarial training is the right anchor for decoupled external perturbation sources and rotating diversity pressure.
+- DFANet-style face-recognition attacks support feature-level transfer pressure as more useful than label-only pressure in this domain.
+- `AdvFaceGAN`, `Adv-Makeup`, and `Greedy-DiM` give the surrogate-attack side distinct face-specific manipulation mechanisms.
+- `Partial FC` and sub-center variants are relevant because this project wants large-class training and noisy identities.
+- `WebFace4M` is the best local serious training set under a tight storage budget.
+- `WF42M` remains the ceiling target, not the default local working set.
+- Recent ensemble-attack theory supports two usable rules: transferability improves with surrogate vulnerability and surrogate diversity.
+- Recent FR attack work keeps moving toward harder surrogate diversity, stronger black-box transfer, and more system-level realism.
+- Recent FR robustness work says adversarial robustness alone is not enough; OOD corruptions and appearance variations must also be evaluated.
+
+Main comparison
+- clean baseline
+- strongest single attack
+- primary attacker set
+- primary-plus-surrogate attacker set
+- broader robustness evaluation
+
+Core hypothesis
+- Diversity matters more than raw attack strength alone.
+- Recognizer diversity and attack diversity should improve robustness transfer across unseen recognizers and unseen attacks.
+- Surrogate diversity on the attack side matters at least as much as perturbation diversity.
+- Any robustness gain must be reported next to clean-performance loss.
+
+Best training approach for this repo
+- Train and evaluate the system as ensemble-aware recognizer hardening.
+- Build directly toward the final trainable system, then scale backbone and dataset once the contract is verified.
+- Keep the defended side heterogeneous and small, not wide and redundant.
+- The current engineering path now includes a joint defended recognizer pool implementation.
+- Train the defended recognizer pool jointly when the code path is stable enough to support it.
+- Keep the attacker side diverse and explicit even when the defended recognizers are optimized together.
+- Use the recognizer ensemble and attacker ensemble for attack generation, hard-pair mining, sampling pressure, and transfer evaluation.
+- Keep the target loss simple and strong: margin-based identity classification plus clean/adversarial consistency and targeted hard-sample emphasis.
+- The current claim direction is: we train a joint defended recognizer pool under rotating attacker-family pressure and test whether pooled supervision improves robustness transfer.
+- Under a local `20GB` class budget, do not start with full adversarial pressure.
+- Use a `3`-stage depth curriculum: clean warmup, shallow adversarial depth, then full adversarial depth.
+- Stage `1` should be clean-only so the backbone and embedding geometry stabilize first.
+- Stage `2` should use weak fast attacks with reduced budgets and partial attacker rotation.
+- Stage `3` should use the full primary-attacker rotation and the final attack budgets.
+- Heavy semantic attacks should stay periodic or eval-time and appear only late if used at all.
+- Full robust evaluation should be periodic and mostly posthoc, not always-on inside every epoch.
+- `ArcFace` is the main tuned recipe.
+- `CosFace` and `CurricularFace` are part of the defended recognizer ensemble, not side baselines.
+
+Primary target
+- Base defended recognizer set: `ArcFace` + `CosFace` + `CurricularFace`.
+- `ArcFace` is the canonical anchor.
+- `ArcFace` should be treated as the main serious recipe on `iResNet100`.
+- `CosFace` and `CurricularFace` provide the foundational same-family comparisons for the paper.
+- Final target is a full recognizer trained in this repo, with `ArcFace` fixed to `iResNet100`.
+- Practical early runs should use the smaller backbone as a real verification stage of the final training contract, not as a throwaway placeholder path.
+- Current repo entry point for the pooled path: `target_model = joint_pool`.
+
+Data ladder
+- local verification data: `WebFace4M` subset manifests on the small backbone
+- local serious data: aligned `WebFace4M`
+- ceiling data: aligned `WF42M`
+- avoid inventing a random 20GB `WF42M` slice unless it is identity-balanced and alignment-matched
+- current local serious target: keep `WebFace4M` as the storage budget dataset and finish its trainable ingestion path cleanly
+- `CelebA` is retired from the active training and testing plan
+
+Ceiling contract
+- RetinaFace-class 5-point alignment
+- `112x112` crop
+- `WebFace42M`
+- `IR-ResNet200`
+- `512-D` embedding
+- `ArcFace` with `s=64`, `m=0.5`
+- `Partial FC` at `0.3`
+- distributed PyTorch
+- AMP
+- gradient checkpointing
+
+Recognizer plan
+- implement `ArcFace` first
+- keep `ArcFace` as the main tuned recognizer and move it to `iResNet100`
+- keep `CosFace` and `CurricularFace` in the same training contract as the two other ensemble recognizers
+- use held-out recognizers for transfer evaluation instead of expanding the trained ensemble indefinitely
+- pull native upstream code into `Backends` when the native implementation adds real value or compatibility
+- keep one training API in `Training/` even if native backends are pulled for reference or asset reuse
+
+Attack plan
+- keep a compact primary attacker set and a distinct surrogate attacker set for the core paper system
+- primary attacker set: `PGD` + `BPFA` + `DFANet`
+- primary set logic: cover white-box optimization, modern transfer attack pressure, and FR-specific feature-level attack pressure
+- surrogate attacker set: `AdvFaceGAN` + `Adv-Makeup` + `Greedy-DiM`
+- surrogate set logic: cover unrestricted dual-identity attack pressure, semantic makeup manipulation, and morphing pressure
+- main-loop attackers should stay standard and cheap enough to rotate by batch
+- morphing, makeup, and other generative attackers should be periodic-training or eval-time pressure, not the default every-batch path
+- later realism extension: evaluate on FR plus FAS or PAD stacks, not only the matcher
+- do not present the attack pool as a random collection of face manipulation tools; present it as a transfer-oriented attack ensemble
+
+Ensemble logic
+- ensemble training here means ensemble-informed training, not naive weight averaging
+- use the recognizer ensemble as the frozen recognizer side of the training pressure
+- use the attacker ensemble as the rotating attack side of the training pressure
+- keep primary attackers and surrogate attackers as distinct roles, not one undifferentiated list
+- rotate one primary attacker family per batch instead of blending all attacker families into every batch
+- use a `50%` clean / `50%` adversarial batch policy as the final full-depth defended recognizer contract
+- use a shallower adversarial fraction in the intermediate stage, not at full depth immediately
+- split adversarial intent evenly between impersonation and dodging
+- use the ensemble to mine hard pairs and hard negatives that survive across recognizers
+- reserve held-out recognizers for transfer evaluation
+- judge success by robustness transfer, not by ensemble complexity
+
+Method rules
+- freeze the split before serious runs
+- minimize pure smoke-test framing; use early small-backbone runs to verify the real training contract
+- log enough to reproduce each run
+- do hypothesis-driven ablations only
+- do not brute-force every combination
+- prefer aligned and documented public training sets over ad hoc local mixtures
+- if local storage is capped around `20GB`, prefer `WebFace4M` over a poorly justified `WF42M` slice
+- keep a base set and an extended set; do not collapse everything into one monolithic experiment matrix
+- use broader surrogate diversity for attack generation than for the defended training target list
+- keep early clean fraction high and early hard-pair weight low so the classifier learns identities before the attack pressure dominates
+- treat a `WebFace4M` slice as medium-scale adversarial fine-tuning rather than pretending it is full-scale pretraining
+- first serious slice schedule: `24` epochs with `2` epoch LR warmup and about `2-3` clean warmup epochs
+- prefer effective batch around `512` if hardware allows; otherwise solve that later with accumulation rather than changing the core method
+- treat data-path throughput as first-order: keep shard-local batching and avoid globally random access across compressed `WebFace4M` shards
+- keep device tuning switchable between `MPS` and `CUDA`; do not collapse tuning around only one device path
+
+Success condition
+- The repo can run clean and attacked training end to end.
+- The repo can run the base defended recognizer set through one consistent training and evaluation contract.
+- The repo can run a real manifest-backed `WebFace4M` small-backbone training path with attacks, pairing, curriculum, checkpoints, and logs as the first stage toward the final model.
+- The repo can scale from that verified small-backbone contract to the final chosen backbone without changing the fundamental training design.
+- The paper can show whether rotating attack-pool diversity improves robustness on seen and unseen attacks without hiding the clean-cost tradeoff.
+- The paper can show transfer robustness across unseen recognizers and report OOD corruption and variation robustness, not adversarial robustness alone.
+
+References
+- `[R1]` OODFace: Benchmarking Robustness of Face Recognition under Common Corruptions and Appearance Variations. Main support for broad robustness evaluation and the claim that adversarial robustness alone is too narrow. https://arxiv.org/abs/2412.02479
+- `[R2]` Towards Deep Learning Models Resistant to Adversarial Attacks. Main support for Madry-style PGD adversarial training and robust optimization as the defended recognizer update rule. https://arxiv.org/abs/1706.06083
+- `[R3]` Improving the Transferability of Adversarial Attacks on Face Recognition with Beneficial Perturbation Feature Augmentation. Main support for `BPFA` as a transferable FR base attack. https://arxiv.org/abs/2210.16117
+- `[R4]` Ensemble Adversarial Training: Attacks and Defenses. Main support for decoupled external perturbation sources and rotating ensemble pressure instead of joint defended-pool optimization. https://arxiv.org/abs/1705.07204
+- `[R5]` Towards Transferable Adversarial Attack against Deep Face Recognition. Main support for `DFANet`, feature-level transfer pressure, and the claim that feature-level attacks transfer better in face recognition. https://arxiv.org/abs/2004.05790
+- `[R6]` AdvFaceGAN: a face dual-identity impersonation attack method based on generative adversarial networks. Main support for the unrestricted dual-identity surrogate-attacker slot. https://peerj.com/articles/cs-2904/
+- `[R7]` Adv-Makeup: A New Imperceptible and Transferable Attack on Face Recognition. Main support for the semantic makeup surrogate-attacker slot. https://arxiv.org/abs/2105.03162
+- `[R8]` Greedy-DiM: Greedy Algorithms for Unreasonably Effective Face Morphs. Main support for the morphing surrogate-attacker slot. https://arxiv.org/abs/2404.06025
+- `[R9]` Adversarial Attacks on Both Face Recognition and Face Anti-spoofing Models. Main support for the FR plus FAS realism extension. https://www.ijcai.org/proceedings/2025/278

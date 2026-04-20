@@ -1,0 +1,128 @@
+FYP todo
+
+Status key
+- `[DONE]` finished enough to use
+- `[NOT DONE]` still missing, incomplete, or not trustworthy enough
+
+Interpretation rule
+- Treat code, configs, run outputs, and core notes as repo-impacting sources of truth.
+- Treat files under `notes/reports/` as non-repo-impacting report outputs that should follow the repo, not drive repo decisions.
+
+1. Recognizer implementation
+- `[DONE]` build a smaller-backbone ArcFace path under the final training/data contract
+- `[DONE]` use that smaller ArcFace path as the first real verification-stage training path under the final contract
+- `[DONE]` extend the local training stack to CosFace
+- `[DONE]` extend the local training stack to CurricularFace
+- `[DONE]` pull native `CosFace` into `Backends`
+- `[DONE]` pull native `CurricularFace` into `Backends`
+- `[DONE]` write tuned `WebFace4M` `ResNet18` presets for `ArcFace`, `CosFace`, and `CurricularFace`
+- `[NOT DONE]` verify ArcFace config, checkpoints, env, detector/alignment path, and WebFace42M path end to end on the smaller backbone
+- `[DONE]` decide the final defended recognizer ensemble formally: `ArcFace`, `CosFace`, `CurricularFace`
+- `[DONE]` decide the final serious ArcFace backbone formally: `iResNet100`
+- `[NOT DONE]` scale the verified training contract from the small backbone to `ArcFace` `iResNet100`
+- `[NOT DONE]` finish the serious `ArcFace` `iResNet100` path end to end
+- `[DONE]` verify `CosFace` and `CurricularFace` under the same ensemble-training contract as real WebFace4M subset non-smoke runs
+- `[DONE]` repair all repo notes and framing so they consistently describe the defended recognizer ensemble as `ArcFace`, `CosFace`, and `CurricularFace`
+
+2. Engineering repairs
+- `[DONE]` repair `scripts/align_faces_retinaface.py`
+- `[DONE]` repair `Training/pairing.py` with ensemble-aware hard-pair mining
+- `[DONE]` repair `Training/arcface.py` with sub-center option
+- `[DONE]` repair `Training/config.py` with pairing-strategy fields
+- `[DONE]` repair `Training/engine.py` with curriculum and hard-sample logging
+- `[DONE]` clean up CLI, config, logging, and output I/O
+
+3. Environment and data
+- `[NOT DONE]` define the CUDA serious-run path fully and keep it parallel to the `MPS` path
+- `[DONE]` define the MPS verification-run path fully
+- `[NOT DONE]` pin dependencies and snapshot reproducibility state
+- `[NOT DONE]` purge unneeded backends cleanly
+- `[NOT DONE]` pull the actual `WebFace42M` using the script and confirm the path is usable
+- `[DONE]` choose the best local serious dataset under about `20GB`: aligned `WebFace4M` is the current recommendation
+- `[DONE]` install `webdataset` and `huggingface_hub` into the local training environment
+- `[NOT DONE]` keep the full `WebFace42M` pull path and define the local serious working set cleanly
+- `[NOT DONE]` if `WF42M` must be locally sliced, define an identity-balanced curation rule instead of a random byte cap
+- `[NOT DONE]` add `Training/wf42m_manifest_schema.json`
+- `[DONE]` finish the `WebFace4M` ingestion path with manifest-backed shard training in `Training/dataset.py`
+- `[DONE]` keep manifest-backed `WebFace4M` training shard-local enough to avoid first-batch collapse from globally random compressed-shard access
+- `[DONE]` add a `WebFace4M` manifest-prep script for train and val split generation
+- `[NOT DONE]` finish the full local `WebFace4M` download and build manifests from the complete shard set
+- `[DONE]` run a low-epoch shard-backed `WebFace4M` small-backbone test on a local subset through the real training path
+- `[DONE]` remove `CelebA` from the active training and testing path once the `WebFace4M` subset-backed verification path fully replaces it
+
+4. Attack implementation
+- `[DONE]` configure the current online attack policies for stronger transfer pressure with random starts, restart selection, and broader surrogate balance
+- `[DONE]` define the final primary attacker set as `PGD`, `BPFA`, and `DFANet`
+- `[DONE]` define the final surrogate attacker set as `AdvFaceGAN`, `Adv-Makeup`, and `Greedy-DiM`
+- `[NOT DONE]` classify each planned attacker as primary-set, surrogate-set, eval-only, or appendix-only in the implementation notes
+- `[DONE]` implement the intended primary attacker trio end to end
+- `[DONE]` implement the intended surrogate attacker trio end to end as cached external pressure
+- `[NOT DONE]` run an availability audit on every planned attacker before integration
+- `[DONE]` make the attack side of the ensemble explicit in code instead of treating all attacks as one undifferentiated pool
+- `[DONE]` freeze the main-loop scope as standard attackers in-loop and morph or makeup or generative attackers as periodic-training or eval-time pressure
+
+5. Ensemble and training design
+- `[NOT DONE]` freeze the main comparison conditions around base set versus extended set
+- `[DONE]` freeze the sampling policy around rotating attacker family pressure by batch
+- `[DONE]` freeze the batch policy: `50%` clean, `50%` adversarial, one primary attacker family per batch, `50%` impersonation and `50%` dodging
+- `[DONE]` freeze the training-depth policy: `3` stages with clean warmup, shallow adversarial depth, and full adversarial depth
+- `[DONE]` add the first joint defended recognizer pool implementation entry point
+- `[DONE]` set the current best local serious starting recipe: high clean warmup, delayed attacks, low initial hard-pair pressure, wider surrogate diversity
+- `[DONE]` encode the first serious slice schedule: `24` epochs, `2` epoch LR warmup, clean-first start, then shallow-to-full adversarial depth
+- `[DONE]` make full multi-attack evaluation periodic instead of always-on during training
+- `[NOT DONE]` freeze the ablation plan before large runs
+- `[DONE]` choose the productive ensemble logic: defended recognizer pool, transfer-oriented attack pool, hard mining, and cross-recognizer transfer evaluation
+- `[NOT DONE]` validate the joint defended pool thoroughly enough to replace the older single-defended-recognizer framing everywhere
+- `[IN PROGRESS]` update the wording of the claim around the joint defended recognizer pool
+
+6. Verification path
+- `[DONE]` build a tiny verification run
+- `[DONE]` use a tiny identity subset, tiny attack subset, and short run for early contract checks
+- `[DONE]` run one clean baseline and one small multi-attack condition
+- `[DONE]` verify the loop, sampler, gradients, checkpoints, logging, and eval plumbing on the small backbone
+- `[DONE]` verify the full training pipeline on a small sample
+- `[DONE]` prove the `WebFace4M` subset-backed verification path on the small backbone
+- `[DONE]` run the pair-verification path end to end on the tuned local `ArcFace` verification config
+- `[DONE]` correct the local identification metric to use inference-time logits instead of margin-injected training logits
+- `[DONE]` migrate all active verification configs and tests fully onto `WebFace4M` manifests and stop depending on `CelebA`
+
+7. Local baseline path
+- `[DONE]` define `ArcFace`-`ResNet18` as a real local baseline path
+- `[DONE]` replace temporary local baselines with `WebFace4M` subset-backed clean and attacked baselines
+- `[DONE]` remove `CelebA` from the active baseline definition after the `WebFace4M` replacement is complete
+
+8. Full runs
+- `[NOT DONE]` run the clean baseline at serious `WebFace4M` scale
+- `[NOT DONE]` run the strongest single-attack condition
+- `[NOT DONE]` run the fixed primary-attacker-set condition
+- `[NOT DONE]` run the primary-plus-periodic-surrogate attacker condition
+- `[IN PROGRESS]` run the full three-recognizer joint-pool condition under the final attacker design
+- `[NOT DONE]` test curriculum as a real experiment
+- `[NOT DONE]` compare `ArcFace`, `CosFace`, and `CurricularFace` clean and robust behavior under one fixed training contract
+- `[NOT DONE]` start the serious `WebFace4M` `ArcFace` `iResNet100` run after the full local shard pull finishes
+- `[DONE]` run a low-epoch `WebFace4M` subset-backed `MPS` verification run on `ResNet18`
+- `[NOT DONE]` add the switchable `MPS` versus `CUDA` tuned run configs for the same `WebFace4M` training contract
+
+9. Evaluation and reporting
+- `[NOT DONE]` evaluate clean verification and identification properly
+- `[NOT DONE]` evaluate seen-attack robustness
+- `[NOT DONE]` evaluate unseen-attack robustness
+- `[NOT DONE]` evaluate white-box robustness
+- `[NOT DONE]` evaluate transfer robustness
+- `[NOT DONE]` evaluate unseen-recognizer and cross-recognizer robustness
+- `[NOT DONE]` evaluate OOD corruption robustness
+- `[NOT DONE]` evaluate OOD appearance-variation robustness
+- `[NOT DONE]` test whether `Adv-Pruning` and any physical or semantic extensions add non-redundant failure modes beyond the transferable base set
+- `[NOT DONE]` evaluate FR plus FAS or PAD system realism as a later extension
+- `[NOT DONE]` add metrics harvesting and report-building pipeline
+- `[NOT DONE]` build paper tables and figures
+
+10. Claim validation
+- `[NOT DONE]` test whether diversity beats strongest-only
+- `[NOT DONE]` test whether broader threat coverage improves generalization
+- `[NOT DONE]` test whether frozen auxiliary recognizer pressure improves transfer more than strongest-single-recognizer training
+- `[NOT DONE]` test whether the primary-plus-periodic-surrogate attacker design improves transfer more than the primary attacker set alone
+- `[NOT DONE]` test whether OOD robustness and adversarial robustness move together or trade off
+- `[NOT DONE]` test whether physical or semantic extensions add non-redundant value
+- `[NOT DONE]` test whether clean degradation stays acceptable and explicit
+- `[NOT DONE]` narrow or reframe the claim if the evidence does not support it

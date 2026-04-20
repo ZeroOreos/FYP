@@ -1,12 +1,12 @@
-# DiM Wrapper
+# Greedy-DiM Wrapper
 
-This entrypoint is the FYP-facing wrapper for DiM.
+This entrypoint is the FYP-facing wrapper for the `Greedy-DiM` morphing slot.
 
 Current status:
 
 - The canonical pipeline entrypoint is `generate.py`.
 - The implementation logic lives in `wrapper.py`.
-- Imported native source location is `Backends/sources/attack/DiM_native_upstream/`.
+- Imported native source location is `Backends/sources/attack/surrogate/Greedy-DiM_upstream/`.
 - Expected backend assets location is `Backends/assets/attack/dim/`.
 
 Important fidelity note:

@@ -1,333 +1,115 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "layout": {
     "backends_root": "Backends",
     "sources_root": "Backends/sources",
+    "recognition_sources_root": "Backends/sources/recognition",
+    "attack_sources_root": "Backends/sources/attack",
+    "attack_primary_sources_root": "Backends/sources/attack/primary",
+    "attack_surrogate_sources_root": "Backends/sources/attack/surrogate",
     "dependencies_root": "Backends/sources/dependencies",
     "assets_root": "Backends/assets",
     "workdirs_root": "Backends/workdirs",
-    "attack_sources_root": "Backends/sources/attack",
+    "recognition_assets_root": "Backends/assets/recognition",
+    "recognition_workdirs_root": "Backends/workdirs/recognition",
     "attack_assets_root": "Backends/assets/attack",
-    "attack_workdirs_root": "Backends/workdirs/attack",
-    "protection_sources_root": "Backends/sources/protection",
-    "protection_assets_root": "Backends/assets/protection",
-    "protection_workdirs_root": "Backends/workdirs/protection"
+    "attack_workdirs_root": "Backends/workdirs/attack"
   },
   "entries": [
     {
-      "name": "fawkes",
-      "kind": "protection_backend",
-      "status": "bootstrapped",
-      "repo_dir": "Backends/sources/protection/Fawkes_upstream",
-      "upstream_label": "Fawkes preserved upstream snapshot",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
-      "wrapper_ref": "Models/protection/fawkes/wrapper.py",
-      "checkpoint_dir": "Backends/assets/protection/fawkes",
-      "workdir_dir": "Backends/workdirs/protection/fawkes",
-      "required_paths": [
-        "Backends/sources/protection/Fawkes_upstream/README.md",
-        "Backends/sources/protection/Fawkes_upstream/setup.py",
-        "Backends/sources/protection/Fawkes_upstream/LICENSE",
-        "Models/protection/fawkes/wrapper.py"
-      ]
-    },
-    {
-      "name": "faceshield_protection",
-      "kind": "protection_backend",
-      "status": "bootstrapped",
-      "repo_dir": "Backends/sources/protection/FaceShield_upstream",
-      "upstream_label": "FaceShield preserved upstream snapshot",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
-      "wrapper_ref": "Models/protection/faceshield/wrapper.py",
-      "checkpoint_dir": "Backends/assets/protection/faceshield",
-      "workdir_dir": "Backends/workdirs/protection/faceshield",
-      "required_paths": [
-        "Backends/sources/protection/FaceShield_upstream/README.md",
-        "Backends/sources/protection/FaceShield_upstream/environment.yaml",
-        "Models/protection/faceshield/wrapper.py"
-      ]
-    },
-    {
-      "name": "falco",
-      "kind": "protection_backend",
-      "status": "verified",
-      "repo_dir": "Backends/sources/protection/FALCO_upstream",
-      "upstream_label": "FALCO preserved upstream snapshot",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
-      "wrapper_ref": "Models/protection/falco/wrapper.py",
-      "checkpoint_dir": "Backends/assets/protection/falco",
-      "workdir_dir": "Backends/workdirs/protection/falco",
-      "required_paths": [
-        "Backends/sources/protection/FALCO_upstream/README.md",
-        "Backends/sources/protection/FALCO_upstream/LICENSE",
-        "Models/protection/falco/wrapper.py"
-      ]
-    },
-    {
-      "name": "deepprivacy2",
-      "kind": "protection_backend",
-      "status": "verified",
-      "repo_dir": "Backends/sources/protection/DeepPrivacy2_upstream",
-      "upstream_label": "DeepPrivacy2 preserved upstream snapshot",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
-      "wrapper_ref": "Models/protection/deepprivacy2/wrapper.py",
-      "checkpoint_dir": "Backends/assets/protection/deepprivacy2",
-      "workdir_dir": "Backends/workdirs/protection/deepprivacy2",
-      "required_paths": [
-        "Backends/sources/protection/DeepPrivacy2_upstream/readme.md",
-        "Backends/sources/protection/DeepPrivacy2_upstream/LICENSE",
-        "Models/protection/deepprivacy2/wrapper.py"
-      ]
-    },
-    {
-      "name": "facial_attributes_obfuscation",
-      "kind": "protection_backend",
-      "status": "verified",
-      "repo_dir": "Backends/sources/protection/Facial_Attributes_Obfuscation_upstream",
-      "upstream_label": "Facial Attributes Obfuscation preserved upstream snapshot",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
-      "wrapper_ref": "Models/protection/facial_attributes_obfuscation/wrapper.py",
-      "checkpoint_dir": "Backends/assets/protection/facial_attributes_obfuscation",
-      "workdir_dir": "Backends/workdirs/protection/facial_attributes_obfuscation",
-      "required_paths": [
-        "Backends/sources/protection/Facial_Attributes_Obfuscation_upstream/README.md",
-        "Models/protection/facial_attributes_obfuscation/wrapper.py"
-      ]
-    },
-    {
-      "name": "unidefense",
-      "kind": "protection_backend",
-      "status": "verified",
-      "repo_dir": "Backends/sources/protection/UniDefense_upstream",
-      "upstream_label": "UniDefense preserved upstream snapshot",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
-      "wrapper_ref": "Models/protection/unidefense/wrapper.py",
-      "checkpoint_dir": "Backends/assets/protection/unidefense",
-      "workdir_dir": "Backends/workdirs/protection/unidefense",
-      "required_paths": [
-        "Backends/sources/protection/UniDefense_upstream/README.md",
-        "Models/protection/unidefense/wrapper.py"
-      ]
-    },
-    {
-      "name": "m2f2_det",
-      "kind": "protection_backend",
-      "status": "bootstrapped",
-      "repo_dir": "Backends/sources/protection/M2F2_Det_upstream",
-      "upstream_label": "M2F2-Det preserved upstream snapshot",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
-      "wrapper_ref": "Models/protection/m2f2_det/wrapper.py",
-      "checkpoint_dir": "Backends/assets/protection/m2f2_det",
-      "workdir_dir": "Backends/workdirs/protection/m2f2_det",
-      "required_paths": [
-        "Backends/sources/protection/M2F2_Det_upstream/README.md",
-        "Backends/sources/protection/M2F2_Det_upstream/LICENSE",
-        "Models/protection/m2f2_det/wrapper.py"
-      ]
-    },
-    {
-      "name": "adaface",
+      "name": "cosface",
       "kind": "recognition_backend",
       "status": "bootstrapped",
-      "repo_dir": "Backends/sources/AdaFace_upstream",
-      "upstream_label": "AdaFace preserved upstream snapshot",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
-      "wrapper_ref": "Models/AdaFace/generate.py",
-      "checkpoint_dir": "Backends/assets/recognition/adaface",
-      "workdir_dir": "Backends/workdirs/recognition/adaface",
+      "repo_dir": "Backends/sources/recognition/CosFace_upstream",
+      "upstream_label": "CosFace public upstream snapshot",
+      "wrapper_ref": "Training/recognizers.py",
+      "checkpoint_dir": "Backends/assets/recognition/cosface",
+      "workdir_dir": "Backends/workdirs/recognition/cosface",
       "required_paths": [
-        "Backends/sources/AdaFace_upstream/README.md",
-        "Backends/sources/AdaFace_upstream/inference.py",
-        "Models/AdaFace/generate.py"
+        "Backends/sources/recognition/CosFace_upstream/README.md",
+        "Backends/sources/recognition/CosFace_upstream/layer.py",
+        "Training/recognizers.py"
       ]
     },
     {
-      "name": "magface",
+      "name": "curricularface",
       "kind": "recognition_backend",
       "status": "bootstrapped",
-      "repo_dir": "Backends/sources/MagFace_upstream",
-      "upstream_label": "MagFace preserved upstream snapshot",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
-      "wrapper_ref": "Models/MagFace/generate.py",
-      "checkpoint_dir": "Backends/assets/recognition/magface",
-      "workdir_dir": "Backends/workdirs/recognition/magface",
+      "repo_dir": "Backends/sources/recognition/CurricularFace_upstream",
+      "upstream_label": "CurricularFace official upstream snapshot",
+      "wrapper_ref": "Training/recognizers.py",
+      "checkpoint_dir": "Backends/assets/recognition/curricularface",
+      "workdir_dir": "Backends/workdirs/recognition/curricularface",
       "required_paths": [
-        "Backends/sources/MagFace_upstream/README.md",
-        "Backends/sources/MagFace_upstream/inference/gen_feat.py",
-        "Models/MagFace/generate.py"
+        "Backends/sources/recognition/CurricularFace_upstream/README.md",
+        "Backends/sources/recognition/CurricularFace_upstream/head/metrics.py",
+        "Training/recognizers.py"
+      ]
+    },
+    {
+      "name": "bpfa",
+      "kind": "primary_attack_backend",
+      "status": "native",
+      "repo_dir": "Backends/sources/attack/primary/BPFA_upstream",
+      "upstream_label": "Paper-aligned native training implementation with reserved upstream slot",
+      "wrapper_ref": "Training/attacks.py",
+      "required_paths": [
+        "Backends/sources/attack/primary/BPFA_upstream/README.md",
+        "Training/attacks.py"
+      ]
+    },
+    {
+      "name": "dfanet",
+      "kind": "primary_attack_backend",
+      "status": "native",
+      "repo_dir": "Backends/sources/attack/primary/DFANet_upstream",
+      "upstream_label": "Paper-aligned native training implementation with reserved upstream slot",
+      "wrapper_ref": "Training/attacks.py",
+      "required_paths": [
+        "Backends/sources/attack/primary/DFANet_upstream/README.md",
+        "Training/attacks.py"
       ]
     },
     {
       "name": "advfacegan",
-      "kind": "backend",
+      "kind": "surrogate_attack_backend",
       "status": "verified",
-      "repo_dir": "Backends/sources/attack/AdvFaceGAN_upstream",
+      "repo_dir": "Backends/sources/attack/surrogate/AdvFaceGAN_upstream",
       "upstream_label": "AdvFaceGAN preserved upstream snapshot",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
       "wrapper_ref": "Modifiers/attack/advfacegan/wrapper.py",
       "checkpoint_dir": "Backends/assets/attack/advfacegan",
       "workdir_dir": "Backends/workdirs/attack/advfacegan",
       "required_paths": [
-        "Backends/sources/attack/AdvFaceGAN_upstream/README.md",
+        "Backends/sources/attack/surrogate/AdvFaceGAN_upstream/README.md",
         "Modifiers/attack/advfacegan/wrapper.py"
-      ],
-      "runtime_outputs": [
-        "Backends/sources/attack/AdvFaceGAN_upstream/output",
-        "Backends/sources/attack/AdvFaceGAN_upstream/tmp"
       ]
     },
     {
-      "name": "dim",
-      "kind": "backend",
+      "name": "adv-makeup",
+      "kind": "surrogate_attack_backend",
+      "status": "bootstrapped",
+      "repo_dir": "Backends/sources/attack/surrogate/Adv-Makeup_upstream",
+      "upstream_label": "Official Adv-Makeup upstream snapshot with local wrapper",
+      "wrapper_ref": "Modifiers/attack/adv_makeup/wrapper.py",
+      "checkpoint_dir": "Backends/assets/attack/adv_makeup",
+      "workdir_dir": "Backends/workdirs/attack/adv_makeup",
+      "required_paths": [
+        "Backends/sources/attack/surrogate/Adv-Makeup_upstream/README.md",
+        "Modifiers/attack/adv_makeup/wrapper.py"
+      ]
+    },
+    {
+      "name": "greedy-dim",
+      "kind": "surrogate_attack_backend",
       "status": "partial",
-      "repo_dir": "Backends/sources/attack/DiM_native_upstream",
-      "upstream_label": "Greedy-DiM native upstream import with encrypted runner plus local approximation wrapper",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
+      "repo_dir": "Backends/sources/attack/surrogate/Greedy-DiM_upstream",
+      "upstream_label": "Greedy-DiM native upstream import with local approximation wrapper",
       "wrapper_ref": "Modifiers/attack/dim/wrapper.py",
       "checkpoint_dir": "Backends/assets/attack/dim",
       "workdir_dir": "Backends/workdirs/attack/dim",
       "required_paths": [
-        "Backends/sources/attack/DiM_native_upstream/README.md",
+        "Backends/sources/attack/surrogate/Greedy-DiM_upstream/README.md",
         "Modifiers/attack/dim/wrapper.py"
-      ]
-    },
-    {
-      "name": "fomm",
-      "kind": "backend",
-      "status": "verified",
-      "repo_dir": "Backends/sources/attack/FOMM_upstream",
-      "upstream_label": "First Order Motion Model preserved upstream snapshot",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
-      "wrapper_ref": "Modifiers/attack/fomm/wrapper.py",
-      "checkpoint_dir": "Backends/assets/attack/fomm",
-      "workdir_dir": "Backends/workdirs/attack/fomm",
-      "required_paths": [
-        "Backends/sources/attack/FOMM_upstream/demo.py",
-        "Modifiers/attack/fomm/wrapper.py"
-      ],
-      "runtime_outputs": [
-        "Backends/sources/attack/FOMM_upstream/output",
-        "Backends/sources/attack/FOMM_upstream/tmp"
-      ]
-    },
-    {
-      "name": "mipgan",
-      "kind": "backend",
-      "status": "partial",
-      "repo_dir": "Backends/sources/attack/MIPGAN_upstream",
-      "upstream_label": "MIPGAN official public portal snapshot (native package still separately licensed/password-protected)",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
-      "wrapper_ref": "Modifiers/attack/mipgan/wrapper.py",
-      "checkpoint_dir": "Backends/assets/attack/mipgan",
-      "workdir_dir": "Backends/workdirs/attack/mipgan",
-      "required_paths": [
-        "Backends/sources/attack/MIPGAN_upstream/README.md",
-        "Backends/sources/attack/MIPGAN_upstream/MIPGAN-license-240916.pdf",
-        "Modifiers/attack/mipgan/wrapper.py"
-      ]
-    },
-    {
-      "name": "mordiff",
-      "kind": "backend",
-      "status": "verified",
-      "repo_dir": "Backends/sources/attack/MorDIFF_upstream",
-      "upstream_label": "MorDIFF preserved upstream snapshot",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
-      "wrapper_ref": "Modifiers/attack/mordiff/wrapper.py",
-      "checkpoint_dir": "Backends/assets/attack/mordiff",
-      "workdir_dir": "Backends/workdirs/attack/mordiff",
-      "required_paths": [
-        "Backends/sources/attack/MorDIFF_upstream/README.md",
-        "Modifiers/attack/mordiff/wrapper.py"
-      ],
-      "runtime_outputs": [
-        "tmp/mordiff_verify_out_native",
-        "tmp/mordiff_env_verify_out",
-        "tmp/mordiff_mps_venv_out",
-        "tmp/mordiff_wrapper_mps_out"
-      ]
-    },
-    {
-      "name": "reface",
-      "kind": "backend",
-      "status": "verified",
-      "repo_dir": "Backends/sources/attack/REFace_upstream",
-      "upstream_label": "REFace preserved upstream snapshot",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
-      "wrapper_ref": "Modifiers/attack/reface/wrapper.py",
-      "checkpoint_dir": "Backends/assets/attack/reface",
-      "workdir_dir": "Backends/workdirs/attack/reface",
-      "required_paths": [
-        "Backends/sources/attack/REFace_upstream/README.md",
-        "Backends/sources/attack/REFace_upstream/scripts/inference_swap_selected.py",
-        "Modifiers/attack/reface/wrapper.py"
-      ],
-      "runtime_outputs": [
-        "Backends/sources/attack/REFace_upstream/assets",
-        "Backends/sources/attack/REFace_upstream/examples",
-        "tmp/reface_smoke_assets",
-        "tmp/reface_smoke_out",
-        "tmp/reface_smoke_records.json"
-      ],
-      "dependencies": [
-        "taming-transformers"
-      ]
-    },
-    {
-      "name": "simswap",
-      "kind": "backend",
-      "status": "verified",
-      "repo_dir": "Backends/sources/attack/SimSwap_upstream",
-      "upstream_label": "SimSwap preserved upstream snapshot",
-      "notes_ref": "notes/working/20_backend_adaptations.txt",
-      "wrapper_ref": "Modifiers/attack/simswap/wrapper.py",
-      "checkpoint_dir": "Backends/assets/attack/simswap",
-      "workdir_dir": "Backends/workdirs/attack/simswap",
-      "required_paths": [
-        "Backends/sources/attack/SimSwap_upstream/README.md",
-        "Modifiers/attack/simswap/wrapper.py"
-      ],
-      "runtime_outputs": [
-        "Backends/sources/attack/SimSwap_upstream/output",
-        "Backends/sources/attack/SimSwap_upstream/crop_224",
-        "Backends/sources/attack/SimSwap_upstream/demo_file",
-        "Backends/sources/attack/SimSwap_upstream/docs/img"
-      ],
-      "tolerated_legacy_paths": [
-        "Backends/sources/attack/SimSwap_upstream/checkpoints",
-        "Backends/sources/attack/SimSwap_upstream/arcface_model"
-      ]
-    },
-    {
-      "name": "taming-transformers",
-      "kind": "dependency",
-      "status": "required-for-reface",
-      "repo_dir": "Backends/sources/dependencies/taming-transformers",
-      "legacy_repo_dirs": [
-        "Backends/sources/taming-transformers"
-      ],
-      "upstream_label": "CompVis taming-transformers support dependency",
-      "required_paths": [
-        "Backends/sources/dependencies/taming-transformers/setup.py",
-        "Backends/sources/dependencies/taming-transformers/taming"
-      ],
-      "consumers": [
-        "reface"
-      ]
-    },
-    {
-      "name": "diffae",
-      "kind": "dependency",
-      "status": "required-for-mordiff-and-dim-native",
-      "repo_dir": "Backends/sources/dependencies/diffae",
-      "upstream_label": "phizaz DiffAE support dependency",
-      "required_paths": [
-        "Backends/sources/dependencies/diffae/README.md",
-        "Backends/sources/dependencies/diffae/templates.py"
-      ],
-      "consumers": [
-        "mordiff",
-        "dim"
       ]
     }
   ]

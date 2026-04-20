@@ -1,0 +1,14 @@
+{
+  "dataset_name": "WebFace42M",
+  "target_root": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/WebFace42M",
+  "source_root": null,
+  "linked_source": false,
+  "status": "prepared",
+  "notes": [
+    "The published ceiling targets WebFace42M with RetinaFace-style 5-point alignment and 112x112 crops.",
+    "This repo keeps a smaller local placeholder backbone and embedding dim for practical iteration.",
+    "This repository does not currently bundle a curated local WF42M subset.",
+    "For a local serious training set under about 20GB, the current recommendation is to use aligned WebFace4M rather than an ad hoc WF42M byte slice.",
+    "Actual WebFace42M contents are not bundled in the repo and must come from a local source prepared separately."
+  ]
+}

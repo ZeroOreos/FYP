@@ -1,0 +1,9 @@
+{
+  "dataset_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/WebFace4M/subset_manifests/train.jsonl",
+  "pairs_out": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/pairs/WebFace4M_subset_train_pairs.npz",
+  "dataset_hash": "e2cf2735b838387c73259ec3e4d56face353bea394da6e8902841125b65b1888",
+  "seed": 42,
+  "folds": 5,
+  "positive_pairs_per_id": 1,
+  "negative_pairs_per_id": 1
+}

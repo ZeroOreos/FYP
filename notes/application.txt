@@ -1,0 +1,166 @@
+FYP application
+
+Current repo state
+- The repo is training-first.
+- The repo is intended to be the full and final model-training repo.
+- The active entrypoint is `main_train_ensemble.py`.
+- Files under `notes/reports/` are non-repo-impacting report artifacts and writeups.
+- Reports must be treated as downstream descriptions of the repo state, not as the source of truth for repo decisions.
+- If a report conflicts with code, configs, run artifacts, or core notes, trust the repo implementation and repair the report instead of steering the repo toward the report.
+- The current trainable target is `ArcFace` on `ResNet18` as the current real verification-stage backbone.
+- The intended defended recognizer ensemble for the paper is `ArcFace`, `CosFace`, and `CurricularFace`.
+- The intended attacker ensemble for the paper is split into primary attackers and surrogate attackers.
+- The repo already contains small completed sample runs under `TrainingRuns/`.
+- `CosFace` and `CurricularFace` now complete real WebFace4M subset non-smoke attacked runs alongside `ArcFace` in the same local training API.
+- Native `CosFace` and `CurricularFace` sources are now pulled into `Backends`.
+- The tuned path should now be framed as recognizer training under a two-sided ensemble: recognizer ensemble plus attacker ensemble.
+- `WebFace4M` is now the only active training and verification data path in the repo.
+
+What exists now
+- clean and attacked ensemble training loop
+- shard-aware manifest sampling for `WebFace4M` throughput
+- attack-policy sampling
+- online `pgd`, `bpfa`, and `dfanet` attacks
+- random-start and restart-selected online attack generation for stronger attack batches
+- cached attack hook
+- `ArcFace` margin head with `Partial FC`
+- optional sub-center ArcFace path
+- ensemble-aware hard-pair mining
+- curriculum scheduling for clean fraction and hard-pair weighting
+- run outputs: config snapshot, checkpoints, history, summary, `train.log`, `metrics.jsonl`
+- RetinaFace-class alignment script with CLI and manifest output
+- trainable `ArcFace`, `CosFace`, and `CurricularFace` targets through one CLI
+- native manifest-backed shard loading for `WebFace4M`
+- a `WebFace4M` manifest-prep script for train and val JSONL generation
+- corrected identification metrics that use inference-time logits instead of label-margin training logits
+
+Sample runs already present
+- `TrainingRuns/arcface_resnet18_smoke`
+- `TrainingRuns/arcface_resnet18_ensemble_smoke`
+- `TrainingRuns/ceiling_clean_smoke`
+- `TrainingRuns/arcface_resnet18_small_live`
+- `TrainingRuns/webface4m_arcface_resnet18_partial_lowepoch_mps`
+- `TrainingRuns/webface4m_arcface_resnet18_subset_lowepoch_mps`
+
+What research says to do next
+- frame the system as adversarial recognizer training with a defended recognizer pool and an attack pool
+- keep the defended recognizer set compact and paper-legible instead of expanding into too many side families
+- use the foundational margin-loss recognizers that make the comparison logic easy to justify in the paper
+- train the defended recognizer pool jointly and keep the attacker side diverse and explicit
+- keep the attack side ensemble-aware with explicit primary attackers and explicit surrogate attackers
+- keep the main recognizer ensemble as `ArcFace`, `CosFace`, and `CurricularFace`
+- define the primary attacker set as `PGD`, `BPFA`, and `DFANet`
+- define the surrogate attacker set as `AdvFaceGAN`, `Adv-Makeup`, and `Greedy-DiM`
+- move the local serious training set to aligned `WebFace4M`
+- keep `WF42M` as the ceiling target for larger compute only
+- evaluate clean performance, white-box robustness, black-box transfer, cross-recognizer transfer, and OOD corruptions or appearance variations
+- keep FR plus FAS or PAD as a realism extension, not the initial core claim
+- keep the defended recognizer update rule Madry-style and keep the external diversity pressure Tramer-style
+- use a `3`-stage training-depth curriculum instead of forcing full attack strength from epoch `1`
+- stage `1`: clean warmup to stabilize backbone and feature geometry
+- stage `2`: shallow adversarial depth with weak fast attacks, reduced budgets, and partial attacker rotation
+- stage `3`: full adversarial depth with full joint recognizer-pool pressure and full primary-attacker rotation
+- keep full multi-attack evaluation periodic, not every epoch
+- rotate one primary attacker family per batch instead of blending every family into every batch
+- use a default `50%` clean / `50%` adversarial batch split
+- use a default adversarial intent split of `50%` impersonation / `50%` dodging
+- keep morphing, makeup, and generative attacks as periodic-training or eval-time pressure, not the default every-batch path
+
+What this implementation is
+- the working final training repo
+- an early but real training stage for ensemble-aware recognizer hardening
+- a smaller-backbone verification path that should converge into the final model path
+- good enough for local verification runs, pipeline repair, and experiment wiring
+- now includes tuned `WebFace4M` `ResNet18` presets for `ArcFace`, `CosFace`, and `CurricularFace`
+- now has pair-verification support on `WebFace4M` manifest-backed data
+- now has an `MPS`-targeted serious `WebFace4M` `ArcFace` `ResNet18` config ready for the full local shard set
+- now has one completed low-epoch shard-backed `WebFace4M` subset run on `MPS`
+- the active forward path should now migrate fully to `WebFace4M` for both testing and training
+
+What this implementation is not
+- not yet the final serious `ArcFace` `iResNet100` implementation end to end
+- not fully environment-pinned
+- not fully paper-ready
+- not yet aligned with the final selected paper backbone and final attacker design
+- not proof that the main claim is true
+- not yet evidence that the current joint defended-pool implementation is the right final standard for FR
+
+Known hard limits
+- the final `WebFace4M` or `WF42M` run on the chosen final backbone is still larger-scale work
+- current small-backbone runs are for real contract verification, debugging, and early ablations, not just smoke tests
+- alignment backends still depend on external packages being installed
+- the primary attacker trio `PGD`, `BPFA`, and `DFANet` is now wired natively in the training stack
+- the intended surrogate attacker trio `AdvFaceGAN`, `Adv-Makeup`, and `Greedy-DiM` is available as cached external pressure rather than the main every-batch in-memory path
+- the final paper recognizer trio is defined, but the serious `iResNet100` path is not wired in end to end yet
+- OOD corruption and appearance-variation evaluation is not wired in yet
+- FR plus FAS system-level evaluation is not wired in yet
+
+Use now
+- prepare `WebFace4M` manifests
+- run a `WebFace4M` subset-backed small-backbone verification training
+- run a `WebFace4M` subset-backed attacked ensemble condition
+- inspect checkpoints and metrics
+- use the alignment script only when a RetinaFace-class backend is installed
+- keep training configs switchable between `MPS` tuning and `CUDA` tuning for the same `WebFace4M` contract
+
+Best local training set under about `20GB`
+- Best recommendation: use aligned `WebFace4M`, not an ad hoc `WF42M` slice.
+- Reason: it is a real face-recognition training set with published use in modern recognition work, and the gzip WebDataset release appears small enough to fit the budget.
+- Avoid a random `WF42M` cut unless it is curated by identity balance, image count per identity, and alignment quality.
+
+Current tuned recipe under that budget
+- recognizer ensemble: `ArcFace`, `CosFace`, and `CurricularFace`
+- primary attacker set: `PGD`, `BPFA`, `DFANet`
+- surrogate attacker set: `AdvFaceGAN`, `Adv-Makeup`, `Greedy-DiM`
+- final serious `ArcFace` target: `iResNet100`
+- current verification-stage backbone path: `ResNet18`
+- optimizer: `SGD`
+- train the defended recognizer pool jointly under rotating attacker pressure
+- treat a `WebFace4M` slice as medium-scale adversarial fine-tuning, not full from-scratch large-scale pretraining
+- first serious schedule: `24` epochs
+- use `2` epoch LR warmup
+- use `2-3` clean warmup epochs before adversarial pressure
+- use stage `2` shallow adversarial depth before full budgets
+- keep `50%` clean and `50%` adversarial samples in the final full-depth stage
+- rotate by batch through white-box, transfer, and FR feature-level primary attacker families
+- keep adversarial targets split `50%` impersonation and `50%` dodging
+- keep hard-pair mining modest early and ramp it later
+- use `Partial FC` for the serious many-class recipe
+- use sub-center `ArcFace` for the serious `ArcFace` preset
+- keep dropout at `0.0` in the tuned serious presets instead of `0.4`
+- keep morphing, makeup, and generative attacks periodic or eval-time rather than the default main-loop attacker path
+- keep the final research framing centered on the named primary-attacker and surrogate-attacker sets, while the code treats standard primary attackers as the main loop and surrogate attackers as cached external pressure
+- use native shard manifests for `WebFace4M` instead of extracting the full dataset into an identity-root tree
+- target effective batch around `512` when hardware allows; otherwise use accumulation later instead of weakening the core method
+- decay the LR around `40-45%`, `75%`, and `90%` of the first serious schedule
+- keep checkpointing and loader-worker counts tuned for the actual final device, not left always-on by default
+
+Joint pool timing assumption
+- optimized-load assumption: `MS1MV3`, `R100`, joint pool `ArcFace + CosFace + CurricularFace`, `Partial FC` enabled, fast adversarial training on most batches, heavy semantic attacks periodic or eval-time
+- main defended run estimate: `4090-class ~60-120 GPU-h`, `5090/A40-class ~45-90 GPU-h`, `A100 40GB ~50-95 GPU-h`, `A100 80GB ~40-80 GPU-h`
+- full paper ladder estimate: `4090-class ~190-540 GPU-h`, `5090/A40-class ~145-405 GPU-h`, `A100 40GB ~160-430 GPU-h`, `A100 80GB ~130-360 GPU-h`
+
+Latest local tuning result
+- `WebFace4M` ingestion is now implemented in code
+- a low-epoch shard-backed `WebFace4M` subset run now completes on `MPS`
+- that subset run shows the real path works end to end: manifest loader, training loop, checkpoints, and verification pairs
+- the remaining blocker for the serious full run is the long local shard download, not the training contract
+- the remaining cleanup task is to finish the run-history and reporting migration to `WebFace4M`
+
+Do not pretend
+- the placeholder backbone is the paper result
+- smoke runs are final evidence
+- more backends automatically mean more contribution
+- a local `20GB` budget can faithfully stand in for full `WF42M`
+- the current ensemble loop already matches the best-supported 2025 FR robustness framing
+
+References
+- `[R1]` OODFace: Benchmarking Robustness of Face Recognition under Common Corruptions and Appearance Variations. Used for adding OOD corruption and appearance-variation evaluation to the protocol. https://arxiv.org/abs/2412.02479
+- `[R2]` Towards Deep Learning Models Resistant to Adversarial Attacks. Used for the Madry-style robust optimization framing and PGD adversarial training baseline. https://arxiv.org/abs/1706.06083
+- `[R3]` Improving the Transferability of Adversarial Attacks on Face Recognition with Beneficial Perturbation Feature Augmentation. Used for `BPFA` in the primary attacker set. https://arxiv.org/abs/2210.16117
+- `[R4]` Ensemble Adversarial Training: Attacks and Defenses. Used for the Tramer-style decoupled external perturbation source framing and rotating ensemble pressure. https://arxiv.org/abs/1705.07204
+- `[R5]` Towards Transferable Adversarial Attack against Deep Face Recognition. Used for `DFANet` and the feature-level transfer framing in face recognition. https://arxiv.org/abs/2004.05790
+- `[R6]` AdvFaceGAN: a face dual-identity impersonation attack method based on generative adversarial networks. Used for the unrestricted dual-identity surrogate-attack slot. https://peerj.com/articles/cs-2904/
+- `[R7]` Adv-Makeup: A New Imperceptible and Transferable Attack on Face Recognition. Used for the semantic makeup surrogate-attack slot. https://arxiv.org/abs/2105.03162
+- `[R8]` Greedy-DiM: Greedy Algorithms for Unreasonably Effective Face Morphs. Used for the morphing surrogate-attack slot. https://arxiv.org/abs/2404.06025
+- `[R9]` Adversarial Attacks on Both Face Recognition and Face Anti-spoofing Models. Used for the FR plus FAS or PAD realism extension. https://www.ijcai.org/proceedings/2025/278

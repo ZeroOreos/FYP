@@ -28,7 +28,7 @@ else:
 
 DEFAULTS = external_backend_defaults(
     "advfacegan",
-    "AdvFaceGAN_upstream",
+    "surrogate/AdvFaceGAN_upstream",
     default_checkpoint="generator.pth",
 )
 

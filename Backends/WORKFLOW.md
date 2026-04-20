@@ -1,22 +1,24 @@
 # Backends Workflow
 
-This folder stores backend-related source snapshots, dependencies, assets, and workdirs used by the FYP attack and protection wrappers.
+This folder stores backend-related source snapshots, dependencies, assets, and workdirs used by the FYP attack and recognition pipelines.
 
 The goal is to keep these externals reproducible without turning the main repo into a Git-management headache.
 
 ## Layout
 
-- `Backends/sources/attack/<Name>_upstream/`: preserved third-party attack backends
-- `Backends/sources/protection/<Name>_upstream/`: preserved third-party protection / detection backends
+- `Backends/sources/recognition/<Name>_upstream/`: preserved third-party recognition backends that belong to the active recognizer ensemble
+- `Backends/sources/attack/primary/<Name>_upstream/`: preserved third-party primary-attacker backends
+- `Backends/sources/attack/surrogate/<Name>_upstream/`: preserved third-party surrogate-attacker backends
 - `Backends/sources/dependencies/`: support repositories that are dependencies of a backend but are not attack methods themselves
 - `Backends/assets/attack/<method>/`: local attack-model weights and support assets
-- `Backends/assets/protection/<method>/`: local protection-model weights and support assets
 - `Backends/workdirs/attack/<method>/`: temporary attack-wrapper workdirs
-- `Backends/workdirs/protection/<method>/`: temporary protection-wrapper workdirs
+- `Backends/assets/recognition/<method>/`: local recognition-model weights and support assets
+- `Backends/workdirs/recognition/<method>/`: local recognition runtime envs and scratch state
 
-Current support dependency:
+Current support dependencies:
 
-- `Backends/sources/dependencies/taming-transformers/` for `REFace_upstream`
+- `Backends/sources/dependencies/diffae/` remains available for morphing-related external methods when needed
+- `Backends/sources/dependencies/taming-transformers/` remains available for external image-generation backends when needed
 
 Legacy compatibility:
 
@@ -25,13 +27,13 @@ Legacy compatibility:
 
 ## Rules
 
-- Keep wrapper code out of `Backends/`; wrappers belong in `Models/attack/` and `Models/protection/`
+- Keep wrapper code out of `Backends/`; attack wrappers belong in `Modifiers/attack/`
+- Native training-time attacks such as `pgd`, `bpfa`, and `dfanet` still belong in `Training/attacks.py` even if their upstream slots are reserved under `Backends/sources/attack/primary/`
 - Keep runtime outputs, caches, and downloaded weights out of upstream trees
 - Do not leave nested `.git` directories inside vendored externals
 - Record every backend and dependency in `Backends/manifest.json`
 - Record local behavior changes and fidelity notes in `notes/working/20_backend_adaptations.txt`
-- Protection backends should default to one dedicated env per model under `Backends/workdirs/protection/<method>/`
-- Protection wrappers should prefer device order `cuda -> mps -> cpu` unless per-model notes document a verified reason to override it
+- Remove stale backends when they no longer belong to the active ensemble design instead of letting them linger as implied options
 
 ## Bootstrap Philosophy
 
@@ -73,15 +75,10 @@ Preferred model:
 
 Noise that should be cleaned instead of preserved:
 
-- temporary workdirs under `Backends/workdirs/attack/<method>/` and `Backends/workdirs/protection/<method>/` except `.gitkeep`
+- temporary workdirs under `Backends/workdirs/attack/<method>/` except `.gitkeep`
 - smoke-test artifacts under `tmp/`
-- upstream demo outputs copied into ignored paths such as `Backends/sources/attack/SimSwap_upstream/output/`
-- bulky example media in ignored runtime-only paths such as:
-  `Backends/sources/attack/SimSwap_upstream/crop_224/`
-  `Backends/sources/attack/SimSwap_upstream/demo_file/`
-  `Backends/sources/attack/SimSwap_upstream/docs/img/`
-  `Backends/sources/attack/REFace_upstream/assets/`
-  `Backends/sources/attack/REFace_upstream/examples/`
+- upstream demo outputs copied into vendored source trees
+- bulky example media copied into vendored backend trees
 - nested Git metadata inside vendored directories
 
 Why not heavy bootstrap automation?

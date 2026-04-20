@@ -1,0 +1,106 @@
+{
+  "train_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/WebFace4M/subset_manifests/train.jsonl",
+  "val_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/WebFace4M/subset_manifests/val.jsonl",
+  "output_dir": "/Users/jeromeharianto/Documents/School2/FYP/TrainingRuns/webface4m_joint_pool_resnet18_subset_ablation_no_feature_mps",
+  "target_model": "joint_pool",
+  "target_backbone": "resnet18",
+  "surrogate_models": [
+    "target"
+  ],
+  "attack_sampling_strategy": "family_round_robin",
+  "batch_size": 16,
+  "epochs": 1,
+  "learning_rate": 0.03,
+  "weight_decay": 0.0005,
+  "embedding_dim": 256,
+  "image_size": 112,
+  "num_workers": 0,
+  "clean_weight": 1.0,
+  "adv_weight": 0.35,
+  "consistency_weight": 0.03,
+  "clean_fraction": 0.5,
+  "checkpoint_every": 1,
+  "device": "mps",
+  "seed": 42,
+  "eval_attack_name": "pgd",
+  "evaluate_all_attacks": true,
+  "clean_only": false,
+  "use_mixed_precision": false,
+  "use_gradient_checkpointing": false,
+  "use_distributed": false,
+  "use_sync_batchnorm": false,
+  "optimizer_name": "sgd",
+  "momentum": 0.9,
+  "lr_milestones": [
+    1
+  ],
+  "lr_gamma": 0.2,
+  "arcface_scale": 64.0,
+  "arcface_margin": 0.5,
+  "use_partial_fc": true,
+  "partial_fc_negative_sample_rate": 0.3,
+  "sub_center_count": 1,
+  "dropout_p": 0.0,
+  "alignment_detector": "RetinaFace-class",
+  "alignment_landmarks": 5,
+  "normalized_crop_size": 112,
+  "dataset_name": "WebFace4M-subset",
+  "joint_pool_member_weights": {
+    "arcface": 0.4,
+    "cosface": 0.3,
+    "curricularface": 0.3
+  },
+  "pairing_strategy": "ensemble_hard",
+  "pairing_surrogate_weights": {
+    "target": 1.0
+  },
+  "hard_pair_fraction": 0.05,
+  "hard_pair_min_pairs": 4,
+  "hard_pair_max_pairs": 16,
+  "hard_pair_weight": 0.02,
+  "curriculum_enabled": false,
+  "curriculum_warmup_epochs": 1,
+  "curriculum_clean_fraction_end": 0.5,
+  "curriculum_hard_pair_fraction_end": 0.05,
+  "curriculum_hard_pair_weight_end": 0.02,
+  "val_pairs_path": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/pairs/WebFace4M_subset_train_pairs.npz",
+  "attack_start_epoch": 1,
+  "log_every_batches": 20,
+  "primary_attackers": [
+    {
+      "name": "pgd",
+      "family": "primary_white_box",
+      "kind": "online",
+      "weight": 0.7142857142857143,
+      "enabled": true,
+      "eps": 0.03137254901960784,
+      "alpha": 0.00392156862745098,
+      "steps": 1,
+      "random_start": true,
+      "restarts": 1,
+      "surrogate_weights": {
+        "target": 1.0
+      },
+      "cache_roots": [],
+      "refresh_every_epochs": null
+    },
+    {
+      "name": "bpfa",
+      "family": "primary_transfer",
+      "kind": "online",
+      "weight": 0.28571428571428575,
+      "enabled": true,
+      "eps": 0.03137254901960784,
+      "alpha": 0.00196078431372549,
+      "steps": 1,
+      "random_start": true,
+      "restarts": 1,
+      "surrogate_weights": {
+        "target": 1.0
+      },
+      "cache_roots": [],
+      "refresh_every_epochs": null
+    }
+  ],
+  "surrogate_attackers": []
+}
