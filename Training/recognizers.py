@@ -10,8 +10,10 @@ import torch.nn.functional as F
 from Training.arcface import (
     ArcFaceModel,
     ArcMarginProduct,
+    build_shared_class_subset,
     CosFaceMarginProduct,
     CurricularFaceMarginProduct,
+    FaceBackbone,
     PartialFCArcMarginProduct,
     SubCenterArcMarginProduct,
 )
@@ -30,10 +32,20 @@ class TrainableRecognizer(Protocol):
     def forward_logits(self, images: torch.Tensor, labels: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         ...
 
+    def forward_attack_outputs(
+        self,
+        images: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> dict[str, torch.Tensor | dict[str, dict[str, torch.Tensor]]]:
+        ...
+
     def predict_logits_from_embeddings(self, embeddings: torch.Tensor) -> torch.Tensor:
         ...
 
     def predict_logits(self, images: torch.Tensor) -> torch.Tensor:
+        ...
+
+    def predict_eval_outputs(self, images: torch.Tensor) -> dict[str, torch.Tensor | dict[str, torch.Tensor] | None]:
         ...
 
 
@@ -133,7 +145,7 @@ class MarginTarget(nn.Module):
 
     def forward_logits(self, images: torch.Tensor, labels: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         embeddings = self.forward_embeddings(images)
-        logits = self.margin(embeddings, labels)
+        logits = self.margin.training_outputs(embeddings, labels)["logits"]
         return logits, embeddings
 
     def predict_logits_from_embeddings(self, embeddings: torch.Tensor) -> torch.Tensor:
@@ -143,14 +155,34 @@ class MarginTarget(nn.Module):
         embeddings = self.forward_embeddings(images)
         return self.predict_logits_from_embeddings(embeddings)
 
+    def predict_eval_outputs(self, images: torch.Tensor) -> dict[str, torch.Tensor | dict[str, torch.Tensor] | None]:
+        embeddings = self.forward_embeddings(images)
+        logits = self.predict_logits_from_embeddings(embeddings)
+        return {
+            "embeddings": embeddings,
+            "predict_logits": logits,
+            "member_logits": None,
+        }
+
     def forward(self, images: torch.Tensor, labels: torch.Tensor) -> dict[str, torch.Tensor | None]:
         embeddings = self.forward_embeddings(images)
-        logits = self.margin(embeddings, labels)
-        predict_logits = self.predict_logits_from_embeddings(embeddings)
+        margin_outputs = self.margin.training_outputs(embeddings, labels)
         return {
-            "logits": logits,
+            "logits": margin_outputs["logits"],
+            "loss_labels": margin_outputs["loss_labels"],
             "embeddings": embeddings,
-            "predict_logits": predict_logits,
+            "predict_logits": margin_outputs["predict_logits"],
+            "member_outputs": None,
+        }
+
+    def forward_attack_outputs(self, images: torch.Tensor, labels: torch.Tensor) -> dict[str, torch.Tensor | None]:
+        embeddings = self.forward_embeddings(images)
+        margin_outputs = self.margin.training_outputs(embeddings, labels)
+        return {
+            "logits": margin_outputs["logits"],
+            "loss_labels": margin_outputs["loss_labels"],
+            "embeddings": embeddings,
+            "predict_logits": margin_outputs["predict_logits"],
             "member_outputs": None,
         }
 
@@ -275,51 +307,55 @@ class JointRecognizerPool(nn.Module):
         member_weights: dict[str, float] | None = None,
     ) -> None:
         super().__init__()
-        self.arcface = ArcFaceTarget(
-            num_classes=num_classes,
+        self.backbone = FaceBackbone(
             embedding_dim=embedding_dim,
             pretrained=pretrained,
             backbone_name=backbone_name,
             use_gradient_checkpointing=use_gradient_checkpointing,
-            arcface_scale=arcface_scale,
-            arcface_margin=arcface_margin,
-            use_partial_fc=use_partial_fc,
-            partial_fc_negative_sample_rate=partial_fc_negative_sample_rate,
-            sub_center_count=sub_center_count,
             dropout_p=dropout_p,
         )
-        self.cosface = CosFaceTarget(
-            num_classes=num_classes,
-            embedding_dim=embedding_dim,
-            pretrained=pretrained,
-            backbone_name=backbone_name,
-            use_gradient_checkpointing=use_gradient_checkpointing,
-            arcface_scale=arcface_scale,
-            arcface_margin=0.35,
-            use_partial_fc=False,
-            partial_fc_negative_sample_rate=partial_fc_negative_sample_rate,
-            sub_center_count=1,
-            dropout_p=dropout_p,
+        self.arcface_margin = (
+            SubCenterArcMarginProduct(
+                embedding_dim,
+                num_classes,
+                s=arcface_scale,
+                m=arcface_margin,
+                sub_center_count=sub_center_count,
+            )
+            if sub_center_count > 1
+            else ArcMarginProduct(
+                embedding_dim,
+                num_classes,
+                s=arcface_scale,
+                m=arcface_margin,
+            )
         )
-        self.curricularface = CurricularFaceTarget(
-            num_classes=num_classes,
-            embedding_dim=embedding_dim,
-            pretrained=pretrained,
-            backbone_name=backbone_name,
-            use_gradient_checkpointing=use_gradient_checkpointing,
-            arcface_scale=arcface_scale,
-            arcface_margin=arcface_margin,
-            use_partial_fc=False,
-            partial_fc_negative_sample_rate=partial_fc_negative_sample_rate,
-            sub_center_count=1,
-            dropout_p=dropout_p,
+        self.cosface_margin = CosFaceMarginProduct(
+            embedding_dim,
+            num_classes,
+            s=arcface_scale,
+            m=0.35,
+        )
+        self.curricularface_margin = CurricularFaceMarginProduct(
+            embedding_dim,
+            num_classes,
+            s=arcface_scale,
+            m=arcface_margin,
         )
         self.member_names = ("arcface", "cosface", "curricularface")
         self.embedding_dim = int(embedding_dim)
         self.model_name = "joint_pool"
         self.backbone_name = backbone_name
         self.sub_center_count = sub_center_count
+        self.use_partial_fc = bool(use_partial_fc)
+        self.partial_fc_negative_sample_rate = float(partial_fc_negative_sample_rate)
+        self.num_classes = int(num_classes)
         self.member_weights = self._normalize_member_weights(member_weights)
+        self.member_margins = {
+            "arcface": self.arcface_margin,
+            "cosface": self.cosface_margin,
+            "curricularface": self.curricularface_margin,
+        }
 
     def _normalize_member_weights(self, member_weights: dict[str, float] | None) -> dict[str, float]:
         provided = member_weights or {}
@@ -329,36 +365,40 @@ class JointRecognizerPool(nn.Module):
         total = sum(max(0.0, value) for value in weights.values())
         return {name: max(0.0, value) / total for name, value in weights.items()}
 
-    def _member_modules(self) -> dict[str, MarginTarget]:
-        return {
-            "arcface": self.arcface,
-            "cosface": self.cosface,
-            "curricularface": self.curricularface,
-        }
+    def _member_margins(self) -> dict[str, nn.Module]:
+        return self.member_margins
 
-    def _component_embeddings(self, images: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return (
-            self.arcface.forward_embeddings(images),
-            self.cosface.forward_embeddings(images),
-            self.curricularface.forward_embeddings(images),
-        )
+    def preprocess(self, images: torch.Tensor) -> torch.Tensor:
+        target_size = 112 if self.backbone_name.startswith("iresnet") else 160
+        resized = _resize(images, target_size)
+        return (resized - 0.5) / 0.5
 
     def forward_member_outputs(self, images: torch.Tensor, labels: torch.Tensor) -> dict[str, dict[str, torch.Tensor]]:
+        embeddings = self.backbone(self.preprocess(images))
+        shared_subset = None
+        if self.use_partial_fc:
+            shared_subset = build_shared_class_subset(
+                labels,
+                out_features=self.num_classes,
+                sample_rate=self.partial_fc_negative_sample_rate,
+            )
         outputs: dict[str, dict[str, torch.Tensor]] = {}
-        for name, member in self._member_modules().items():
-            embeddings = member.forward_embeddings(images)
-            logits = member.margin(embeddings, labels)
-            predict_logits = member.predict_logits_from_embeddings(embeddings)
+        for name, margin in self._member_margins().items():
+            margin_outputs = margin.training_outputs(embeddings, labels, class_subset=shared_subset)
+            loss_labels = margin_outputs.get("loss_labels", labels)
+            loss_per_sample = F.cross_entropy(margin_outputs["logits"], loss_labels, reduction="none")
             outputs[name] = {
                 "embeddings": embeddings,
-                "logits": logits,
-                "predict_logits": predict_logits,
+                "logits": margin_outputs["logits"],
+                "loss_labels": loss_labels,
+                "predict_logits": margin_outputs["predict_logits"],
+                "loss_per_sample": loss_per_sample,
+                "loss": loss_per_sample.mean(),
             }
         return outputs
 
     def forward_embeddings(self, images: torch.Tensor) -> torch.Tensor:
-        embeddings = self._component_embeddings(images)
-        return torch.cat(embeddings, dim=1)
+        return self.backbone(self.preprocess(images))
 
     def forward_logits(self, images: torch.Tensor, labels: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         member_outputs = self.forward_member_outputs(images, labels)
@@ -366,23 +406,14 @@ class JointRecognizerPool(nn.Module):
             self.member_weights[name] * member_outputs[name]["logits"]
             for name in self.member_names
         )
-        pooled_embeddings = torch.cat(
-            [member_outputs[name]["embeddings"] for name in self.member_names],
-            dim=1,
-        )
+        pooled_embeddings = member_outputs[self.member_names[0]]["embeddings"]
         return pooled_logits, pooled_embeddings
 
     def predict_member_logits_from_embeddings(self, embeddings: torch.Tensor) -> dict[str, torch.Tensor]:
-        chunks = torch.split(embeddings, self.embedding_dim, dim=1)
-        if len(chunks) != 3:
-            raise ValueError(
-                f"Joint pool embeddings must split into exactly three chunks of size {self.embedding_dim}; "
-                f"got shape {tuple(embeddings.shape)}"
-            )
         return {
-            "arcface": self.arcface.predict_logits_from_embeddings(chunks[0]),
-            "cosface": self.cosface.predict_logits_from_embeddings(chunks[1]),
-            "curricularface": self.curricularface.predict_logits_from_embeddings(chunks[2]),
+            "arcface": self.arcface_margin.inference_logits(embeddings),
+            "cosface": self.cosface_margin.inference_logits(embeddings),
+            "curricularface": self.curricularface_margin.inference_logits(embeddings),
         }
 
     def predict_logits_from_embeddings(self, embeddings: torch.Tensor) -> torch.Tensor:
@@ -397,29 +428,70 @@ class JointRecognizerPool(nn.Module):
         embeddings = self.forward_embeddings(images)
         return self.predict_logits_from_embeddings(embeddings)
 
+    def predict_eval_outputs(self, images: torch.Tensor) -> dict[str, torch.Tensor | dict[str, torch.Tensor] | None]:
+        embeddings = self.forward_embeddings(images)
+        member_logits = self.predict_member_logits_from_embeddings(embeddings)
+        fused_logits = sum(self.member_weights[name] * member_logits[name] for name in self.member_names)
+        return {
+            "embeddings": embeddings,
+            "predict_logits": fused_logits,
+            "member_logits": member_logits,
+        }
+
     def forward(
         self,
         images: torch.Tensor,
         labels: torch.Tensor,
     ) -> dict[str, torch.Tensor | dict[str, dict[str, torch.Tensor]]]:
         member_outputs = self.forward_member_outputs(images, labels)
+        pooled_loss_labels = member_outputs[self.member_names[0]]["loss_labels"]
         pooled_logits = sum(
             self.member_weights[name] * member_outputs[name]["logits"]
             for name in self.member_names
         )
-        pooled_embeddings = torch.cat(
-            [member_outputs[name]["embeddings"] for name in self.member_names],
-            dim=1,
-        )
+        pooled_embeddings = member_outputs[self.member_names[0]]["embeddings"]
         pooled_predict_logits = sum(
             self.member_weights[name] * member_outputs[name]["predict_logits"]
             for name in self.member_names
         )
         return {
             "logits": pooled_logits,
+            "loss_labels": pooled_loss_labels,
             "embeddings": pooled_embeddings,
             "predict_logits": pooled_predict_logits,
             "member_outputs": member_outputs,
+        }
+
+    def forward_attack_outputs(
+        self,
+        images: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> dict[str, torch.Tensor | dict[str, dict[str, torch.Tensor]]]:
+        embeddings = self.backbone(self.preprocess(images))
+        shared_subset = None
+        if self.use_partial_fc:
+            shared_subset = build_shared_class_subset(
+                labels,
+                out_features=self.num_classes,
+                sample_rate=self.partial_fc_negative_sample_rate,
+            )
+        member_logits: dict[str, torch.Tensor] = {}
+        pooled_loss_labels = labels
+        for name, margin in self._member_margins().items():
+            margin_outputs = margin.training_outputs(embeddings, labels, class_subset=shared_subset)
+            member_logits[name] = margin_outputs["logits"]
+            if name == self.member_names[0]:
+                pooled_loss_labels = margin_outputs.get("loss_labels", labels)
+        pooled_logits = sum(
+            self.member_weights[name] * member_logits[name]
+            for name in self.member_names
+        )
+        return {
+            "logits": pooled_logits,
+            "loss_labels": pooled_loss_labels,
+            "embeddings": embeddings,
+            "predict_logits": pooled_logits,
+            "member_outputs": None,
         }
 
 
@@ -497,6 +569,7 @@ def build_target_model(
             partial_fc_negative_sample_rate=partial_fc_negative_sample_rate,
             sub_center_count=sub_center_count,
             dropout_p=dropout_p,
+            member_weights=member_weights,
         )
     else:
         raise ValueError(

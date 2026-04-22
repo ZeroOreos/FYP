@@ -36,6 +36,20 @@ pip install torch torchvision
 pip install facenet-pytorch pytorch-lightning "setuptools<81"
 ```
 
+With `uv`, the project metadata now includes the common runtime packages:
+
+```bash
+uv sync
+```
+
+If you want to try `torch.compile` on Linux `x86_64`, install the optional compile extra:
+
+```bash
+uv sync --extra compile
+```
+
+If Triton is missing, the training code now falls back to eager execution instead of aborting the run.
+
 Retained backend inventory in the refactored layout:
 
 - `Backends/sources/recognition/CosFace_upstream/`
@@ -73,15 +87,16 @@ python3 main_train_ensemble.py \
   --config Training/smoke_ensemble_config.json
 ```
 
-Render the final paper ladder configs while varying only backbone and dataset fraction:
+Render the canonical paper ladder plus the short phase-3 integration config:
 
 ```bash
 python3 scripts/render_paper_ladder_configs.py \
-  --backbone resnet18 \
-  --dataset-fraction 0.01
+  --dataset-fraction 1.0 \
+  --batch-size 32 \
+  --num-workers 16
 ```
 
-This writes canonical paper-reporting configs based on the full `WebFace4M` manifests, not the old subset presets.
+This writes the five full paper runs plus the short `joint-test` config against the full `WebFace4M` manifests.
 
 ## Shell Server Workflow
 
@@ -114,6 +129,64 @@ FYP_OUTPUT_ROOT=/shared/fyp/runs \
 sh scripts/launch_cloud_train.sh \
   Training/arcface_webface4m_resnet18_cloud_template.json \
   arcface-r18-server-serious
+```
+
+For fast throughput tuning on the same DDP/data path, use a benchmark preset instead of the full serious run.
+
+The small `resnet18` preset is useful for loader/DDP smoke checks, but if it under-drives the GPUs use the `iresnet100` benchmark preset instead so the compute mix stays closer to the real run:
+
+```bash
+FYP_WEBFACE4M_ROOT=/shared/fyp/data/WebFace4M \
+FYP_OUTPUT_ROOT=/shared/fyp/runs \
+python3 scripts/render_cloud_config.py \
+  --base-config Training/arcface_webface4m_iresnet100_benchmark_cuda.json \
+  --output-config Training/generated/ir100-bench-bs12.json \
+  --run-name ir100-bench-bs12 \
+  --batch-size 12 \
+  --gradient-accumulation-steps 1 \
+  --num-workers 16 \
+  --dataset-fraction 0.02 \
+  --enable-distributed \
+  --disable-sync-batchnorm \
+  --disable-gradient-checkpointing \
+  --disable-torch-compile
+
+OMP_NUM_THREADS=1 \
+python3 -m torch.distributed.run --standalone --nproc_per_node=8 \
+  main_train_ensemble.py \
+  --config Training/generated/ir100-bench-bs12.json \
+  2>&1 | tee /shared/fyp/runs/logs/ir100-bench-bs12.log
+```
+
+If you specifically want the lighter `resnet18` systems-only check:
+
+```bash
+FYP_WEBFACE4M_ROOT=/shared/fyp/data/WebFace4M \
+FYP_OUTPUT_ROOT=/shared/fyp/runs \
+python3 scripts/render_cloud_config.py \
+  --base-config Training/arcface_webface4m_resnet18_benchmark_cuda.json \
+  --output-config Training/generated/r18-bench-bs64.json \
+  --run-name r18-bench-bs64 \
+  --batch-size 64 \
+  --gradient-accumulation-steps 1 \
+  --num-workers 16 \
+  --dataset-fraction 0.01 \
+  --enable-distributed \
+  --disable-sync-batchnorm \
+  --disable-gradient-checkpointing \
+  --disable-torch-compile
+
+OMP_NUM_THREADS=1 \
+python3 -m torch.distributed.run --standalone --nproc_per_node=8 \
+  main_train_ensemble.py \
+  --config Training/generated/r18-bench-bs64.json \
+  2>&1 | tee /shared/fyp/runs/logs/r18-bench-bs64.log
+```
+
+Summarize the last 50 batch windows from a captured log:
+
+```bash
+python3 scripts/summarize_train_log.py /shared/fyp/runs/logs/r18-bench-bs64.log
 ```
 
 If you want multi-GPU launch through `torchrun`, set:

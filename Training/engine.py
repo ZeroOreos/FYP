@@ -10,7 +10,10 @@ import random
 import subprocess
 import sys
 import time
+import warnings
 from dataclasses import replace
+from datetime import timedelta
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +27,7 @@ from tqdm.auto import tqdm
 
 from Training.attacks import build_attack_policy_sampler, generate_attack_batch
 from Training.config import EnsembleTrainingConfig, save_config_snapshot
-from Training.dataset import build_dataloaders, build_eval_loader
+from Training.dataset import build_dataloaders, build_eval_loader, build_train_loader
 from Training.evaluate import choose_eval_policy, evaluate_clean, evaluate_robust, evaluate_robust_all, evaluate_verification_pairs
 from Training.losses import classification_accuracy, classification_accuracy_tensor, embedding_consistency_loss
 from Training.pairing import HardPairMiningResult, mine_hard_pairs
@@ -55,6 +58,74 @@ def _is_primary() -> bool:
     return _rank() == 0
 
 
+def _effective_global_batch_size_from_batch(config: EnsembleTrainingConfig, batch_size: int) -> int:
+    return max(1, int(batch_size)) * max(1, int(config.gradient_accumulation_steps)) * max(1, _world_size())
+
+
+def _effective_global_batch_size(config: EnsembleTrainingConfig) -> int:
+    return _effective_global_batch_size_from_batch(config, int(config.batch_size))
+
+
+def _reference_global_batch_size(config: EnsembleTrainingConfig) -> int:
+    reference_batch_size = config.reference_batch_size
+    if reference_batch_size is None:
+        reference_batch_size = int(config.batch_size)
+    return max(1, int(reference_batch_size)) * max(1, int(config.gradient_accumulation_steps)) * max(1, _world_size())
+
+
+def _phase_batch_size(config: EnsembleTrainingConfig, stage_name: str) -> int:
+    normalized_stage = stage_name.strip().lower()
+    if normalized_stage == "clean_warmup" and config.clean_warmup_batch_size is not None:
+        return max(1, int(config.clean_warmup_batch_size))
+    if normalized_stage == "shallow_adv" and config.shallow_adv_batch_size is not None:
+        return max(1, int(config.shallow_adv_batch_size))
+    if normalized_stage == "full_adv" and config.full_adv_batch_size is not None:
+        return max(1, int(config.full_adv_batch_size))
+    return max(1, int(config.batch_size))
+
+
+def _learning_rate_scale(config: EnsembleTrainingConfig, *, batch_size: int | None = None) -> float:
+    if not config.auto_scale_learning_rate:
+        return 1.0
+    resolved_batch_size = int(config.batch_size if batch_size is None else batch_size)
+    current_batch = float(_effective_global_batch_size_from_batch(config, resolved_batch_size))
+    reference_batch = float(_reference_global_batch_size(config))
+    ratio = max(1e-12, current_batch / max(1.0, reference_batch))
+    mode = config.lr_scale_mode.strip().lower()
+    if mode == "linear":
+        return ratio
+    if mode == "sqrt":
+        return ratio ** 0.5
+    raise ValueError(f"Unsupported lr_scale_mode '{config.lr_scale_mode}'.")
+
+
+def _resolved_learning_rate(config: EnsembleTrainingConfig, *, batch_size: int | None = None) -> float:
+    return float(config.learning_rate) * _learning_rate_scale(config, batch_size=batch_size)
+
+
+def _apply_runtime_profile(config: EnsembleTrainingConfig) -> list[str]:
+    notes: list[str] = []
+    profile = config.normalized_runtime_profile()
+    if profile == "benchmark":
+        if config.use_torch_compile:
+            config.use_torch_compile = False
+            notes.append("Runtime profile 'benchmark' keeps torch.compile disabled for clean throughput baselines.")
+    elif profile == "paper_full":
+        if config.use_torch_compile:
+            config.use_torch_compile = False
+            notes.append("Runtime profile 'paper_full' keeps torch.compile disabled on the mainline defended run.")
+        if config.use_distributed and max(1, int(config.gradient_accumulation_steps)) > 1 and config.ddp_no_sync_accumulation:
+            config.ddp_no_sync_accumulation = False
+            notes.append("Runtime profile 'paper_full' disables DDP no_sync accumulation for defended full-run stability.")
+    return notes
+
+
+def _truthy(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
 def maybe_init_distributed(config: EnsembleTrainingConfig) -> bool:
     if not config.use_distributed or _world_size() <= 1:
         return False
@@ -73,7 +144,10 @@ def maybe_init_distributed(config: EnsembleTrainingConfig) -> bool:
                 f"LOCAL_RANK={local_rank} is out of range for {device_count} visible CUDA device(s)."
             )
         torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend=backend)
+    dist.init_process_group(
+        backend=backend,
+        timeout=timedelta(seconds=max(60, int(config.distributed_timeout_seconds))),
+    )
     return True
 
 
@@ -86,8 +160,11 @@ def maybe_wrap_ddp(
     if not use_distributed:
         return model
     ddp_kwargs = {
+        "broadcast_buffers": bool(config.ddp_broadcast_buffers),
         "gradient_as_bucket_view": bool(config.ddp_gradient_as_bucket_view),
     }
+    if config.ddp_bucket_cap_mb is not None:
+        ddp_kwargs["bucket_cap_mb"] = int(config.ddp_bucket_cap_mb)
     if "static_graph" in inspect.signature(DistributedDataParallel).parameters:
         ddp_kwargs["static_graph"] = bool(config.ddp_static_graph)
     if device.type == "cuda":
@@ -95,12 +172,25 @@ def maybe_wrap_ddp(
             model,
             device_ids=[torch.cuda.current_device()],
             **ddp_kwargs,
-        )
+    )
     return DistributedDataParallel(model, **ddp_kwargs)
 
 
 def _unwrap_model(model):
     return model.module if isinstance(model, DistributedDataParallel) else model
+
+
+def _ddp_logging_data(model: torch.nn.Module) -> dict[str, Any]:
+    if not isinstance(model, DistributedDataParallel):
+        return {}
+    reducer = getattr(model, "_get_ddp_logging_data", None)
+    if reducer is None:
+        return {}
+    try:
+        data = reducer()
+    except Exception:
+        return {}
+    return dict(data) if isinstance(data, dict) else {}
 
 
 def _make_optimizer(config: EnsembleTrainingConfig, model: torch.nn.Module):
@@ -109,13 +199,19 @@ def _make_optimizer(config: EnsembleTrainingConfig, model: torch.nn.Module):
         optimizer_kwargs["foreach"] = bool(config.optimizer_foreach)
     if config.optimizer_fused is not None:
         optimizer_kwargs["fused"] = bool(config.optimizer_fused)
+    if optimizer_kwargs.get("foreach") and optimizer_kwargs.get("fused"):
+        warnings.warn(
+            "`optimizer_foreach` and `optimizer_fused` were both enabled; disabling fused to keep the optimizer valid.",
+            stacklevel=2,
+        )
+        optimizer_kwargs["fused"] = False
 
     if config.optimizer_name.lower() == "sgd":
         signature = inspect.signature(torch.optim.SGD)
         filtered_kwargs = {key: value for key, value in optimizer_kwargs.items() if key in signature.parameters}
         return torch.optim.SGD(
             model.parameters(),
-            lr=config.learning_rate,
+            lr=_resolved_learning_rate(config),
             momentum=config.momentum,
             weight_decay=config.weight_decay,
             **filtered_kwargs,
@@ -125,7 +221,7 @@ def _make_optimizer(config: EnsembleTrainingConfig, model: torch.nn.Module):
         filtered_kwargs = {key: value for key, value in optimizer_kwargs.items() if key in signature.parameters}
         return torch.optim.AdamW(
             model.parameters(),
-            lr=config.learning_rate,
+            lr=_resolved_learning_rate(config),
             weight_decay=config.weight_decay,
             **filtered_kwargs,
         )
@@ -153,6 +249,19 @@ def _autocast_context(config: EnsembleTrainingConfig, device: torch.device):
     return contextlib.nullcontext()
 
 
+def _make_grad_scaler(config: EnsembleTrainingConfig, device: torch.device, amp_dtype: torch.dtype | None):
+    enabled = config.use_mixed_precision and device.type == "cuda" and amp_dtype == torch.float16
+    amp_module = getattr(torch, "amp", None)
+    grad_scaler_cls = getattr(amp_module, "GradScaler", None)
+    if grad_scaler_cls is not None:
+        return grad_scaler_cls("cuda", enabled=enabled)
+    cuda_amp_module = getattr(torch.cuda, "amp", None)
+    cuda_grad_scaler_cls = getattr(cuda_amp_module, "GradScaler", None)
+    if cuda_grad_scaler_cls is not None:
+        return cuda_grad_scaler_cls(enabled=enabled)
+    raise RuntimeError("Mixed precision requested, but no GradScaler implementation is available in this PyTorch build.")
+
+
 def _resolve_mixed_precision_dtype(
     config: EnsembleTrainingConfig,
     device: torch.device,
@@ -176,8 +285,12 @@ def _resolve_mixed_precision_dtype(
 
 
 def _save_checkpoint(output_dir: Path, epoch: int, model, optimizer, scheduler, scaler, history: list[dict]) -> Path:
-    checkpoint_path = output_dir / "checkpoints" / f"epoch_{epoch:03d}.pth"
-    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_dir = output_dir / "checkpoints"
+    checkpoint_path = checkpoint_dir / "latest.pth"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    for stale_path in checkpoint_dir.glob("*.pth"):
+        if stale_path != checkpoint_path:
+            stale_path.unlink(missing_ok=True)
     base_model = _unwrap_model(model)
     torch.save(
         {
@@ -191,6 +304,25 @@ def _save_checkpoint(output_dir: Path, epoch: int, model, optimizer, scheduler, 
         checkpoint_path,
     )
     return checkpoint_path
+
+
+def _load_checkpoint(
+    checkpoint_path: Path,
+    *,
+    model,
+    optimizer,
+    scheduler,
+    scaler,
+) -> tuple[int, list[dict]]:
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    _unwrap_model(model).load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+    scaler_state = checkpoint.get("scaler_state_dict")
+    if scaler_state is not None and getattr(scaler, "is_enabled", lambda: False)():
+        scaler.load_state_dict(scaler_state)
+    history = checkpoint.get("history", [])
+    return int(checkpoint["epoch"]), list(history)
 
 
 def _write_history(output_dir: Path, history: list[dict]) -> None:
@@ -242,18 +374,21 @@ def _capture_repro_state(output_dir: Path) -> None:
     except Exception as exc:
         payload["git_commit_error"] = str(exc)
 
-    try:
-        pip_freeze = subprocess.check_output(
-            [sys.executable, "-m", "pip", "freeze"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        )
-        freeze_path = output_dir / "pip_freeze.txt"
-        freeze_path.write_text(pip_freeze, encoding="utf-8")
-        payload["pip_freeze_path"] = str(freeze_path)
-        payload["pip_freeze_sha256"] = hashlib.sha256(pip_freeze.encode("utf-8")).hexdigest()
-    except Exception as exc:
-        payload["pip_freeze_error"] = str(exc)
+    if os.environ.get("FYP_CAPTURE_PIP_FREEZE", "").strip().lower() in {"1", "true", "yes", "on"}:
+        try:
+            pip_freeze = subprocess.check_output(
+                [sys.executable, "-m", "pip", "freeze"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+            freeze_path = output_dir / "pip_freeze.txt"
+            freeze_path.write_text(pip_freeze, encoding="utf-8")
+            payload["pip_freeze_path"] = str(freeze_path)
+            payload["pip_freeze_sha256"] = hashlib.sha256(pip_freeze.encode("utf-8")).hexdigest()
+        except Exception as exc:
+            payload["pip_freeze_error"] = str(exc)
+    else:
+        payload["pip_freeze_skipped"] = True
 
     with (output_dir / "repro_state.json").open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)
@@ -266,9 +401,10 @@ class RunLogger:
         self.metrics_path = output_dir / "metrics.jsonl"
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def info(self, message: str) -> None:
+    def info(self, message: str, *, echo: bool = True) -> None:
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        print(message)
+        if echo:
+            print(message)
         with self.log_path.open("a", encoding="utf-8") as handle:
             handle.write(f"{timestamp} {message}\n")
 
@@ -379,8 +515,19 @@ def _apply_epoch_learning_rate(
     scheduler,
     config: EnsembleTrainingConfig,
     epoch: int,
+    *,
+    batch_size: int | None = None,
 ) -> None:
     scheduled_lrs = scheduler.get_last_lr()
+    base_resolved_lr = _resolved_learning_rate(config)
+    current_resolved_lr = _resolved_learning_rate(config, batch_size=batch_size)
+    if base_resolved_lr > 0:
+        scheduled_lrs = [
+            float(current_resolved_lr) * (float(lr) / float(base_resolved_lr))
+            for lr in scheduled_lrs
+        ]
+    else:
+        scheduled_lrs = [float(current_resolved_lr) for _ in scheduled_lrs]
     if config.lr_warmup_epochs <= 0:
         for group, lr in zip(optimizer.param_groups, scheduled_lrs):
             group["lr"] = lr
@@ -626,6 +773,45 @@ def _format_cuda_memory_stats(device: torch.device) -> str:
     )
 
 
+def _safe_divide(numerator: float, denominator: float) -> float:
+    if denominator <= 0:
+        return 0.0
+    return numerator / denominator
+
+
+def _device_summary(device: torch.device) -> dict[str, object]:
+    summary: dict[str, object] = {
+        "type": device.type,
+        "index": device.index,
+    }
+    if device.type == "cuda" and torch.cuda.is_available():
+        index = device.index if device.index is not None else torch.cuda.current_device()
+        props = torch.cuda.get_device_properties(index)
+        summary.update(
+            {
+                "name": props.name,
+                "total_memory_mb": float(props.total_memory) / (1024.0 * 1024.0),
+                "capability": f"{props.major}.{props.minor}",
+            }
+        )
+    return summary
+
+
+def _best_history_value(history: list[dict[str, object]], getter) -> float | None:
+    best: float | None = None
+    for item in history:
+        value = getter(item)
+        if value is None:
+            continue
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        if best is None or numeric > best:
+            best = numeric
+    return best
+
+
 def _reset_cuda_peak_memory(device: torch.device) -> None:
     if device.type != "cuda" or not torch.cuda.is_available():
         return
@@ -670,7 +856,19 @@ def _maybe_compile_model(
     if not config.use_torch_compile:
         return model
     if not hasattr(torch, "compile"):
-        raise RuntimeError("torch.compile requested, but this PyTorch build does not expose torch.compile.")
+        warnings.warn(
+            "torch.compile requested, but this PyTorch build does not expose torch.compile; falling back to eager.",
+            stacklevel=2,
+        )
+        config.use_torch_compile = False
+        return model
+    if config.torch_compile_backend == "inductor" and find_spec("triton") is None:
+        warnings.warn(
+            "torch.compile with inductor requested, but Triton is not installed; falling back to eager.",
+            stacklevel=2,
+        )
+        config.use_torch_compile = False
+        return model
     return torch.compile(
         model,
         backend=config.torch_compile_backend,
@@ -758,11 +956,13 @@ def _raise_batch_runtime_error(
     device: torch.device,
     epoch: int,
     batch_index: int,
+    batch_size: int | None = None,
 ) -> None:
+    resolved_batch_size = int(config.batch_size if batch_size is None else batch_size)
     if _is_cuda_oom(exc):
         raise RuntimeError(
             "CUDA OOM during training batch "
-            f"(epoch={epoch}, batch={batch_index}, batch_size={config.batch_size}, "
+            f"(epoch={epoch}, batch={batch_index}, batch_size={resolved_batch_size}, "
             f"image_size={config.image_size}, mixed_precision={config.use_mixed_precision}). "
             f"{_format_cuda_memory_stats(device)}"
         ) from exc
@@ -775,8 +975,9 @@ def _raise_batch_runtime_error(
     raise exc
 
 
-def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
+def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None) -> dict[str, object]:
     set_seed(config.seed + _rank())
+    runtime_profile_notes = _apply_runtime_profile(config)
     distributed = maybe_init_distributed(config)
     device_name = config.device
     if device_name == "auto" and distributed and torch.cuda.is_available():
@@ -803,6 +1004,7 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
         prefetch_factor=config.prefetch_factor,
         pin_memory=config.pin_memory,
     )
+    active_train_batch_size = int(config.batch_size)
     test_loader = None
     if config.resolved_test_dir() is not None:
         _, test_loader = build_eval_loader(
@@ -811,6 +1013,7 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
             image_size=config.image_size,
             batch_size=config.batch_size,
             num_workers=config.num_workers,
+            distributed=distributed,
             persistent_workers=config.persistent_workers,
             prefetch_factor=config.prefetch_factor,
             pin_memory=config.pin_memory,
@@ -838,25 +1041,53 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
     base_model = _maybe_compile_model(base_model, config)
     surrogates = build_surrogates(config.surrogate_models, base_model, device)
     model = maybe_wrap_ddp(base_model, device, config, distributed)
+    ddp_logging_data = _ddp_logging_data(model)
 
     optimizer = _make_optimizer(config, model)
     scheduler = _make_scheduler(config, optimizer)
     amp_dtype = _resolve_mixed_precision_dtype(config, device)
-    scaler = torch.amp.GradScaler(
-        "cuda",
-        enabled=config.use_mixed_precision and device.type == "cuda" and amp_dtype == torch.float16,
-    )
+    scaler = _make_grad_scaler(config, device, amp_dtype)
 
     rng = random.Random(config.seed)
     eval_policy = choose_eval_policy(config.all_attackers(), config.eval_attack_name)
     history: list[dict] = []
+    start_epoch = 1
+
+    if resume_from is not None:
+        resumed_epoch, history = _load_checkpoint(
+            resume_from,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            scaler=scaler,
+        )
+        start_epoch = resumed_epoch + 1
 
     if _is_primary():
+        lr_scale = _learning_rate_scale(config)
+        resolved_learning_rate = _resolved_learning_rate(config)
+        logger.info(f"[INFO] Runtime:       profile={config.runtime_profile}")
+        for note in runtime_profile_notes:
+            logger.info(f"[INFO] Safety:       {note}")
         logger.info(f"[INFO] Train samples: {len(train_ds)}")
         logger.info(f"[INFO] Val samples:   {len(val_ds)}")
         logger.info(f"[INFO] Classes:       {len(class_to_idx)}")
         logger.info(f"[INFO] Device:        {device}")
         logger.info(f"[INFO] Num workers:   {config.num_workers}")
+        logger.info(f"[INFO] Recognizers:   mode={config.recognizers_mode} target={config.target_model}")
+        if config.uses_joint_train():
+            logger.info("[INFO] Joint train:   ablation/ceiling path enabled")
+        logger.info(f"[INFO] Eff batch:     {_effective_global_batch_size(config)}")
+        logger.info(
+            f"[INFO] Phase batch:    clean={config.clean_warmup_batch_size or config.batch_size} "
+            f"shallow={config.shallow_adv_batch_size or config.batch_size} "
+            f"full={config.full_adv_batch_size or config.batch_size}"
+        )
+        logger.info(
+            f"[INFO] LR policy:     auto_scale={config.auto_scale_learning_rate} "
+            f"mode={config.lr_scale_mode} ref_batch={config.reference_batch_size or config.batch_size} "
+            f"scale={lr_scale:.4f}"
+        )
         if device.type == "mps":
             logger.info(f"[INFO] MPS limiter:   {os.environ.get('PYTORCH_MPS_HIGH_WATERMARK_RATIO', 'unset')}")
         _log_cuda_runtime_diagnostics(logger, config=config, device=device)
@@ -869,7 +1100,10 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
         )
         logger.info(f"[INFO] Aligner:       {config.alignment_detector} / {config.alignment_landmarks}-point / {config.normalized_crop_size}x{config.normalized_crop_size}")
         logger.info(f"[INFO] Surrogates:    {sorted(surrogates)}")
-        logger.info(f"[INFO] Optimizer:     {config.optimizer_name} lr={config.learning_rate} momentum={config.momentum}")
+        logger.info(
+            f"[INFO] Optimizer:     {config.optimizer_name} "
+            f"base_lr={config.learning_rate} resolved_lr={resolved_learning_rate} momentum={config.momentum}"
+        )
         logger.info(f"[INFO] LR warmup:     {config.lr_warmup_epochs}")
         logger.info(f"[INFO] Partial FC:    {config.use_partial_fc} rate={config.partial_fc_negative_sample_rate}")
         logger.info(f"[INFO] Sub-centers:   {config.sub_center_count}")
@@ -887,6 +1121,18 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
         logger.info(f"[INFO] TF32:          {config.enable_tf32}")
         logger.info(f"[INFO] Compile:       {config.use_torch_compile}")
         logger.info(f"[INFO] Distributed:   requested={config.use_distributed} world_size={_world_size()}")
+        logger.info(f"[INFO] DDP timeout:   {config.distributed_timeout_seconds}s")
+        if ddp_logging_data:
+            logger.info(
+                f"[INFO] DDP static ok: {_truthy(ddp_logging_data.get('can_set_static_graph', False))} "
+                f"static={config.ddp_static_graph} bucket_view={config.ddp_gradient_as_bucket_view} "
+                f"broadcast_buffers={config.ddp_broadcast_buffers} bucket_cap_mb={config.ddp_bucket_cap_mb} "
+                f"no_sync_accum={config.ddp_no_sync_accumulation}"
+            )
+        logger.info(
+            f"[INFO] Loader:        pin_memory={config.pin_memory} persistent_workers={config.persistent_workers} "
+            f"prefetch_factor={config.prefetch_factor}"
+        )
         logger.info(f"[INFO] Primary atk:   {[policy.name for policy in config.enabled_primary_attackers()]}")
         logger.info(f"[INFO] Surrogate atk: {[policy.name for policy in config.enabled_surrogate_attackers()]}")
         if config.enabled_attackers():
@@ -899,19 +1145,35 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
             logger.info(f"[INFO] Eval attack:   {eval_policy.name}")
         elif config.clean_only or not config.enabled_attackers():
             logger.info("[INFO] Ensemble:      disabled; running clean placeholder training.")
+        if resume_from is not None:
+            logger.info(f"[INFO] Resume:        {resume_from}")
+            logger.info(f"[INFO] Resume epoch:  {start_epoch}/{config.epochs}")
 
-    for epoch in range(1, config.epochs + 1):
+    for epoch in range(start_epoch, config.epochs + 1):
         _clear_device_caches(device)
         _reset_cuda_peak_memory(device)
         model.train()
         schedule = _resolve_epoch_schedule(config, epoch)
+        epoch_batch_size = _phase_batch_size(config, schedule.get("stage_name", ""))
+        if epoch_batch_size != active_train_batch_size:
+            train_loader = build_train_loader(
+                train_ds,
+                batch_size=epoch_batch_size,
+                num_workers=config.num_workers,
+                distributed=distributed,
+                dataset_subset_seed=config.dataset_subset_seed,
+                persistent_workers=config.persistent_workers,
+                prefetch_factor=config.prefetch_factor,
+                pin_memory=config.pin_memory,
+            )
+            active_train_batch_size = epoch_batch_size
         epoch_attack_policies = _stage_attack_policies(config, schedule)
         attack_sampler = build_attack_policy_sampler(
             policies=epoch_attack_policies,
             strategy=config.attack_sampling_strategy,
             rng=rng,
         ) if epoch_attack_policies else None
-        _apply_epoch_learning_rate(optimizer, scheduler, config, epoch)
+        _apply_epoch_learning_rate(optimizer, scheduler, config, epoch, batch_size=epoch_batch_size)
         if distributed and isinstance(train_loader.sampler, DistributedSampler):
             train_loader.sampler.set_epoch(epoch)
 
@@ -926,6 +1188,16 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
         train_member_metrics_totals: dict[str, dict[str, dict[str, torch.Tensor | float]]] = {}
         batches = 0
         accumulation_steps = max(1, int(config.gradient_accumulation_steps))
+        attacked_batches = 0
+        attacked_samples = 0
+        attack_policy_counts: dict[str, int] = {}
+
+        clean_forward_s_total = 0.0
+        hard_pair_s_total = 0.0
+        attack_generation_s_total = 0.0
+        adv_forward_s_total = 0.0
+        backward_s_total = 0.0
+        optimizer_s_total = 0.0
 
         total_batches = max(1, len(train_loader))
         total_train_samples = len(train_ds)
@@ -936,6 +1208,7 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                 f" {epoch}/{config.epochs}"
                 f" stage={schedule.get('stage_name', 'unknown')}"
                 f" lr={optimizer.param_groups[0]['lr']:.5f}"
+                f" batch={epoch_batch_size}"
                 f" train_batches={total_batches}"
                 f" train_samples={total_train_samples}"
                 f" clean_fraction={float(schedule['clean_fraction']):.2f}"
@@ -947,6 +1220,16 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
             if device.type == "cuda":
                 logger.info(f"[CUDA] epoch={epoch}/{config.epochs} start {_format_cuda_memory_stats(device)}")
         samples_seen = 0
+        optimizer_steps = 0
+        epoch_start_time = time.perf_counter()
+        epoch_data_wait_s = 0.0
+        epoch_compute_s = 0.0
+        log_window_start_time = epoch_start_time
+        log_window_samples_seen = 0
+        log_window_optimizer_steps = 0
+        log_window_data_wait_s = 0.0
+        log_window_compute_s = 0.0
+        last_batch_end_time = epoch_start_time
         train_progress = _manual_progress_bar(
             total=total_train_samples,
             desc=f"Train {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]",
@@ -967,32 +1250,41 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
             )
         optimizer.zero_grad(set_to_none=True)
         for batch_index, (images, labels, _, rel_paths) in enumerate(train_loader, start=1):
+            batch_start_time = time.perf_counter()
+            data_wait_s = max(0.0, batch_start_time - last_batch_end_time)
             try:
                 images = images.to(device, non_blocking=device.type == "cuda")
                 labels = labels.to(device, non_blocking=device.type == "cuda")
                 images = _maybe_channels_last_tensor(images, config, device)
                 train_model = _unwrap_model(model)
                 should_step = (batch_index % accumulation_steps == 0) or (batch_index == total_batches)
-                sync_context = (
-                    model.no_sync()
-                    if isinstance(model, DistributedDataParallel) and not should_step
-                    else contextlib.nullcontext()
-                )
+                sync_context = contextlib.nullcontext()
+                if (
+                    config.ddp_no_sync_accumulation
+                    and isinstance(model, DistributedDataParallel)
+                    and accumulation_steps > 1
+                    and not should_step
+                ):
+                    sync_context = model.no_sync()
 
                 with sync_context:
                     with _autocast_context(config, device):
+                        clean_forward_start = time.perf_counter()
                         clean_outputs = model(images, labels)
+                        clean_forward_s_total += max(0.0, time.perf_counter() - clean_forward_start)
                         clean_logits = clean_outputs["logits"]
+                        clean_loss_labels = clean_outputs.get("loss_labels", labels)
                         clean_embeddings = clean_outputs["embeddings"]
                         clean_predict_logits = clean_outputs["predict_logits"]
                         clean_member_outputs = clean_outputs["member_outputs"]
                         if clean_member_outputs is None:
-                            clean_loss_per_sample = F.cross_entropy(clean_logits, labels, reduction="none")
+                            clean_loss_per_sample = F.cross_entropy(clean_logits, clean_loss_labels, reduction="none")
                             clean_loss = clean_loss_per_sample.mean()
                         else:
                             clean_loss_per_sample = _weighted_member_loss_per_sample(train_model, clean_member_outputs)
                             clean_loss = clean_loss_per_sample.mean()
                             for name, item in clean_member_outputs.items():
+                                member_loss_labels = item.get("loss_labels", labels)
                                 _accumulate_member_epoch_metric(
                                     train_member_metrics_totals,
                                     name=name,
@@ -1003,8 +1295,12 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                                     train_member_metrics_totals,
                                     name=name,
                                     key="clean_accuracy",
-                                    value=classification_accuracy_tensor(item["predict_logits"].detach(), labels),
+                                    value=classification_accuracy_tensor(
+                                        item["predict_logits"].detach(),
+                                        member_loss_labels,
+                                    ),
                                 )
+                        hard_pair_start = time.perf_counter()
                         hard_pairs = _mine_batch_hard_pairs(
                             config=config,
                             images=images,
@@ -1013,6 +1309,7 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                             surrogates=surrogates,
                             schedule=schedule,
                         )
+                        hard_pair_s_total += max(0.0, time.perf_counter() - hard_pair_start)
 
                         if (not bool(schedule["attacks_enabled"])) or config.clean_only or not config.enabled_attackers():
                             attack_result = None
@@ -1030,6 +1327,7 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                             if attack_sampler is None:
                                 raise RuntimeError("Attack sampler missing while attacks are enabled.")
                             policy = attack_sampler.choose()
+                            attack_generation_start = time.perf_counter()
                             attack_result = generate_attack_batch(
                                 policy=policy,
                                 images=adv_images,
@@ -1039,14 +1337,22 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                                 target_model=train_model,
                                 surrogates=surrogates,
                                 device=device,
+                                attack_chunk_size=config.attack_chunk_size,
                             )
+                            attack_generation_s_total += max(0.0, time.perf_counter() - attack_generation_start)
+                            attacked_batches += 1
+                            attacked_samples += int(adv_count)
+                            attack_policy_counts[policy.name] = attack_policy_counts.get(policy.name, 0) + 1
                             attack_images = _maybe_channels_last_tensor(attack_result.images, config, device)
+                            adv_forward_start = time.perf_counter()
                             adv_outputs = model(attack_images, adv_labels)
+                            adv_forward_s_total += max(0.0, time.perf_counter() - adv_forward_start)
                             adv_logits = adv_outputs["logits"]
+                            adv_loss_labels = adv_outputs.get("loss_labels", adv_labels)
                             adv_embeddings = adv_outputs["embeddings"]
                             adv_member_outputs = adv_outputs["member_outputs"]
                             if adv_member_outputs is None:
-                                adv_loss_per_sample = F.cross_entropy(adv_logits, adv_labels, reduction="none")
+                                adv_loss_per_sample = F.cross_entropy(adv_logits, adv_loss_labels, reduction="none")
                                 adv_loss = adv_loss_per_sample.mean()
                                 consistency = embedding_consistency_loss(clean_embeddings[:adv_count], adv_embeddings)
                             else:
@@ -1064,6 +1370,7 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                                     adv_member_outputs,
                                 )
                                 for name, item in adv_member_outputs.items():
+                                    member_loss_labels = item.get("loss_labels", adv_labels)
                                     _accumulate_member_epoch_metric(
                                         train_member_metrics_totals,
                                         name=name,
@@ -1074,7 +1381,10 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                                         train_member_metrics_totals,
                                         name=name,
                                         key="adv_accuracy",
-                                        value=classification_accuracy_tensor(item["predict_logits"].detach(), adv_labels),
+                                        value=classification_accuracy_tensor(
+                                            item["predict_logits"].detach(),
+                                            member_loss_labels,
+                                        ),
                                     )
                                     _accumulate_member_epoch_metric(
                                         train_member_metrics_totals,
@@ -1107,16 +1417,26 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
 
                     scaled_loss = loss / accumulation_steps
                     if scaler.is_enabled():
+                        backward_start = time.perf_counter()
                         scaler.scale(scaled_loss).backward()
+                        backward_s_total += max(0.0, time.perf_counter() - backward_start)
                         if should_step:
+                            optimizer_start = time.perf_counter()
                             scaler.step(optimizer)
                             scaler.update()
                             optimizer.zero_grad(set_to_none=True)
+                            optimizer_s_total += max(0.0, time.perf_counter() - optimizer_start)
+                            optimizer_steps += 1
                     else:
+                        backward_start = time.perf_counter()
                         scaled_loss.backward()
+                        backward_s_total += max(0.0, time.perf_counter() - backward_start)
                         if should_step:
+                            optimizer_start = time.perf_counter()
                             optimizer.step()
                             optimizer.zero_grad(set_to_none=True)
+                            optimizer_s_total += max(0.0, time.perf_counter() - optimizer_start)
+                            optimizer_steps += 1
             except RuntimeError as exc:
                 _raise_batch_runtime_error(
                     exc=exc,
@@ -1124,10 +1444,11 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                     device=device,
                     epoch=epoch,
                     batch_index=batch_index,
+                    batch_size=epoch_batch_size,
                 )
 
             train_loss += loss.detach()
-            train_acc += classification_accuracy_tensor(clean_predict_logits.detach(), labels)
+            train_acc += classification_accuracy_tensor(clean_predict_logits.detach(), clean_loss_labels)
             train_consistency += consistency.detach()
             train_cached_hits += torch.tensor(
                 float(0 if attack_result is None else attack_result.cached_hits),
@@ -1139,19 +1460,47 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
             train_hard_loss += hard_loss.detach()
             batches += 1
             samples_seen += int(labels.numel())
+            global_samples_seen = min(total_train_samples, samples_seen * max(1, _world_size()))
+            batch_end_time = time.perf_counter()
+            compute_s = max(0.0, batch_end_time - batch_start_time)
+            epoch_data_wait_s += data_wait_s
+            epoch_compute_s += compute_s
+            log_window_data_wait_s += data_wait_s
+            log_window_compute_s += compute_s
+            last_batch_end_time = batch_end_time
             if train_progress is not None:
-                train_progress.update(int(labels.numel()))
+                progress_delta = min(total_train_samples - train_progress.n, global_samples_seen - train_progress.n)
+                if progress_delta > 0:
+                    train_progress.update(int(progress_delta))
                 should_refresh_progress = (
                     config.log_every_batches > 0
                     and (batch_index % config.log_every_batches == 0 or batch_index == total_batches)
                 )
                 if should_refresh_progress:
+                    now = time.perf_counter()
+                    elapsed = max(1e-6, now - log_window_start_time)
+                    log_window_samples = samples_seen - log_window_samples_seen
+                    log_window_steps = optimizer_steps - log_window_optimizer_steps
+                    global_img_s = (log_window_samples * max(1, _world_size())) / elapsed
+                    optimizer_steps_s = log_window_steps / elapsed
+                    logged_batches = max(1, batch_index if batch_index == total_batches else config.log_every_batches)
+                    avg_wait_ms = (log_window_data_wait_s * 1000.0) / max(
+                        1,
+                        min(logged_batches, batch_index),
+                    )
+                    avg_compute_ms = (log_window_compute_s * 1000.0) / max(
+                        1,
+                        min(logged_batches, batch_index),
+                    )
                     postfix = {
                         "loss": f"{float((train_loss / max(1, batches)).item()):.4f}",
                         "acc": f"{float((train_acc / max(1, batches)).item()):.4f}",
                         "stage": str(schedule.get("stage_name", "na")),
                         "atk": "on" if bool(schedule["attacks_enabled"]) else "off",
                         "accum": f"{((batch_index - 1) % accumulation_steps) + 1}/{accumulation_steps}",
+                        "img/s": f"{global_img_s:.1f}",
+                        "wait_ms": f"{avg_wait_ms:.1f}",
+                        "step_ms": f"{avg_compute_ms:.1f}",
                         "step": f"{batch_index}/{total_batches}",
                     }
                     if attack_result is not None:
@@ -1160,20 +1509,40 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
             if _is_primary() and config.log_every_batches > 0 and (
                 batch_index % config.log_every_batches == 0 or batch_index == total_batches
             ):
+                now = time.perf_counter()
+                elapsed = max(1e-6, now - log_window_start_time)
+                log_window_samples = samples_seen - log_window_samples_seen
+                log_window_steps = optimizer_steps - log_window_optimizer_steps
+                global_img_s = (log_window_samples * max(1, _world_size())) / elapsed
+                optimizer_steps_s = log_window_steps / elapsed
+                logged_batches = max(1, batch_index if batch_index == total_batches else config.log_every_batches)
+                avg_wait_ms = (log_window_data_wait_s * 1000.0) / max(1, min(logged_batches, batch_index))
+                avg_compute_ms = (log_window_compute_s * 1000.0) / max(1, min(logged_batches, batch_index))
                 logger.info(
                     "[BATCH]"
                     f" epoch={epoch}/{config.epochs}"
                     f" step={batch_index}/{total_batches}"
-                    f" seen={samples_seen}/{total_train_samples}"
+                    f" seen={global_samples_seen}/{total_train_samples}"
                     f" loss={float((train_loss / max(1, batches)).item()):.4f}"
                     f" acc={float((train_acc / max(1, batches)).item()):.4f}"
                     f" stage={schedule.get('stage_name', 'na')}"
                     f" attacks={'on' if bool(schedule['attacks_enabled']) else 'off'}"
                     f" accum={((batch_index - 1) % accumulation_steps) + 1}/{accumulation_steps}"
+                    f" global_img_s={global_img_s:.1f}"
+                    f" opt_steps_s={optimizer_steps_s:.2f}"
+                    f" avg_wait_ms={avg_wait_ms:.1f}"
+                    f" avg_step_ms={avg_compute_ms:.1f}",
+                    echo=False,
                 )
+                log_window_start_time = now
+                log_window_samples_seen = samples_seen
+                log_window_optimizer_steps = optimizer_steps
+                log_window_data_wait_s = 0.0
+                log_window_compute_s = 0.0
         if train_progress is not None:
             train_progress.close()
         _clear_device_caches(device)
+        post_train_cuda_stats = _cuda_memory_stats(device)
         if _is_primary() and device.type == "cuda":
             logger.info(f"[CUDA] epoch={epoch}/{config.epochs} post-train {_format_cuda_memory_stats(device)}")
 
@@ -1212,66 +1581,117 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
         verification_metrics = None
         test_clean_metrics = None
         test_verification_metrics = None
-        if _is_primary():
-            if run_clean_eval:
-                clean_metrics = evaluate_clean(
-                    _unwrap_model(model),
-                    val_loader,
-                    device,
-                    progress_desc=f"Val clean {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]",
-                )
+        if run_clean_eval:
+            clean_metrics = evaluate_clean(
+                _unwrap_model(model),
+                val_loader,
+                device,
+                progress_desc=(
+                    f"Val clean {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]"
+                    if _is_primary()
+                    else None
+                ),
+            )
 
-            if run_full_robust_eval:
-                robust_eval = evaluate_robust_all(
-                    model=_unwrap_model(model),
-                    loader=val_loader,
-                    device=device,
-                    policies=config.all_attackers(),
-                    surrogates=surrogates,
-                    image_size=config.image_size,
-                    progress_prefix=f"Val robust {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]",
-                )
-                robust_metrics = robust_eval["average"]
-                robust_by_attack = robust_eval["by_attack"]
-            elif run_robust_eval:
-                robust_metrics = evaluate_robust(
-                    model=_unwrap_model(model),
-                    loader=val_loader,
-                    device=device,
-                    policy=eval_policy,
-                    surrogates=surrogates,
-                    image_size=config.image_size,
-                    progress_desc=f"Val robust {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]",
-                )
+        if run_full_robust_eval:
+            robust_eval = evaluate_robust_all(
+                model=_unwrap_model(model),
+                loader=val_loader,
+                device=device,
+                policies=config.all_attackers(),
+                surrogates=surrogates,
+                image_size=config.image_size,
+                attack_chunk_size=config.attack_chunk_size,
+                progress_prefix=(
+                    f"Val robust {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]"
+                    if _is_primary()
+                    else None
+                ),
+                distributed=distributed,
+            )
+            robust_metrics = robust_eval["average"]
+            robust_by_attack = robust_eval["by_attack"]
+        elif run_robust_eval:
+            robust_metrics = evaluate_robust(
+                model=_unwrap_model(model),
+                loader=val_loader,
+                device=device,
+                policy=eval_policy,
+                surrogates=surrogates,
+                image_size=config.image_size,
+                progress_desc=(
+                    f"Val robust {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]"
+                    if _is_primary()
+                    else None
+                ),
+            )
 
-            if run_verification_eval:
-                verification_metrics = evaluate_verification_pairs(
-                    model=_unwrap_model(model),
-                    pairs_path=Path(config.val_pairs_path).resolve(),
-                    device=device,
-                )
-            if test_loader is not None and run_clean_eval:
-                test_clean_metrics = evaluate_clean(
-                    _unwrap_model(model),
-                    test_loader,
-                    device,
-                    progress_desc=f"Test clean {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]",
-                )
-            if config.test_pairs_path is not None:
-                test_verification_metrics = evaluate_verification_pairs(
-                    model=_unwrap_model(model),
-                    pairs_path=Path(config.test_pairs_path).resolve(),
-                    device=device,
-                )
+        if _is_primary() and run_verification_eval:
+            verification_metrics = evaluate_verification_pairs(
+                model=_unwrap_model(model),
+                pairs_path=Path(config.val_pairs_path).resolve(),
+                device=device,
+            )
+        if test_loader is not None and run_clean_eval:
+            test_clean_metrics = evaluate_clean(
+                _unwrap_model(model),
+                test_loader,
+                device,
+                progress_desc=(
+                    f"Test clean {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]"
+                    if _is_primary()
+                    else None
+                ),
+            )
+        if _is_primary() and config.test_pairs_path is not None:
+            test_verification_metrics = evaluate_verification_pairs(
+                model=_unwrap_model(model),
+                pairs_path=Path(config.test_pairs_path).resolve(),
+                device=device,
+            )
         _clear_device_caches(device)
+        post_eval_cuda_stats = _cuda_memory_stats(device)
         if _is_primary() and device.type == "cuda":
             logger.info(f"[CUDA] epoch={epoch}/{config.epochs} post-eval {_format_cuda_memory_stats(device)}")
         if distributed and dist.is_initialized():
             dist.barrier()
 
+        epoch_wall_s = max(1e-6, time.perf_counter() - epoch_start_time)
+        performance = {
+            "epoch_wall_s": epoch_wall_s,
+            "global_img_s": _safe_divide(float(samples_seen * max(1, _world_size())), epoch_wall_s),
+            "optimizer_steps_s": _safe_divide(float(optimizer_steps), epoch_wall_s),
+            "samples_seen": float(samples_seen),
+            "optimizer_steps": float(optimizer_steps),
+            "avg_wait_ms": _safe_divide(epoch_data_wait_s * 1000.0, float(max(1, batches))),
+            "avg_step_ms": _safe_divide(epoch_compute_s * 1000.0, float(max(1, batches))),
+            "avg_clean_forward_ms": _safe_divide(clean_forward_s_total * 1000.0, float(max(1, batches))),
+            "avg_hard_pair_ms": _safe_divide(hard_pair_s_total * 1000.0, float(max(1, batches))),
+            "avg_attack_generation_ms": _safe_divide(attack_generation_s_total * 1000.0, float(max(1, attacked_batches))),
+            "avg_adv_forward_ms": _safe_divide(adv_forward_s_total * 1000.0, float(max(1, attacked_batches))),
+            "avg_backward_ms": _safe_divide(backward_s_total * 1000.0, float(max(1, batches))),
+            "avg_optimizer_ms": _safe_divide(optimizer_s_total * 1000.0, float(max(1, optimizer_steps))),
+            "attacked_batches": float(attacked_batches),
+            "attacked_samples": float(attacked_samples),
+            "attack_share_of_batches": _safe_divide(float(attacked_batches), float(max(1, batches))),
+            "attack_policy_counts": {name: int(count) for name, count in sorted(attack_policy_counts.items())},
+        }
+        memory = {
+            "post_train_cuda": post_train_cuda_stats,
+            "post_eval_cuda": post_eval_cuda_stats,
+            "cuda_peak_mb": post_eval_cuda_stats.get("max_allocated_mb", post_train_cuda_stats.get("max_allocated_mb", 0.0)),
+            "cuda_reserved_peak_mb": post_eval_cuda_stats.get("max_reserved_mb", post_train_cuda_stats.get("max_reserved_mb", 0.0)),
+        }
+
         epoch_record = {
             "epoch": epoch,
             "lr": optimizer.param_groups[0]["lr"],
+            "base_learning_rate": float(config.learning_rate),
+            "resolved_learning_rate": float(_resolved_learning_rate(config, batch_size=epoch_batch_size)),
+            "learning_rate_scale": float(_learning_rate_scale(config, batch_size=epoch_batch_size)),
+            "reference_batch_size": int(config.reference_batch_size or config.batch_size),
+            "epoch_batch_size": int(epoch_batch_size),
+            "effective_global_batch_size": int(_effective_global_batch_size_from_batch(config, epoch_batch_size)),
             "train_loss": float((train_loss / max(1, batches)).item()),
             "train_accuracy": float((train_acc / max(1, batches)).item()),
             "train_consistency": float((train_consistency / max(1, batches)).item()),
@@ -1292,6 +1712,8 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
             "val_verification": verification_metrics,
             "test_clean": test_clean_metrics,
             "test_verification": test_verification_metrics,
+            "performance": performance,
+            "memory": memory,
         }
         history.append(epoch_record)
         if _is_primary():
@@ -1305,7 +1727,9 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
                 f" train_loss={epoch_record['train_loss']:.4f}"
                 f" train_acc={epoch_record['train_accuracy']:.4f}"
                 f" hard_pairs={epoch_record['train_hard_pair_count']:.2f}"
+                f" val_clean_loss={clean_metrics.get('loss', float('nan')):.4f}"
                 f" val_clean_acc={clean_metrics.get('accuracy', float('nan')):.4f}"
+                f" val_robust_loss={robust_metrics.get('loss', float('nan')):.4f}"
                 f" val_robust_acc={robust_metrics.get('accuracy', float('nan')):.4f}"
             )
             if epoch_record["train_member_metrics"]:
@@ -1329,6 +1753,35 @@ def run_training(config: EnsembleTrainingConfig) -> dict[str, object]:
         "output_dir": str(output_dir),
         "epochs": config.epochs,
         "history": history,
+        "metrics_schema_version": 2,
+        "runtime_profile": config.normalized_runtime_profile(),
+        "device": _device_summary(device),
+        "distributed": {
+            "enabled": bool(distributed),
+            "world_size": int(_world_size()),
+            "backend": config.distributed_backend,
+            "ddp_no_sync_accumulation": bool(config.ddp_no_sync_accumulation),
+            "ddp_static_graph": bool(config.ddp_static_graph),
+        },
+        "runtime_flags": {
+            "batch_size": int(config.batch_size),
+            "gradient_accumulation_steps": int(config.gradient_accumulation_steps),
+            "effective_global_batch_size": int(_effective_global_batch_size(config)),
+            "mixed_precision": bool(config.use_mixed_precision),
+            "mixed_precision_dtype": config.mixed_precision_dtype,
+            "channels_last": bool(config.use_channels_last),
+            "sync_batchnorm": bool(config.use_sync_batchnorm),
+            "gradient_checkpointing": bool(config.use_gradient_checkpointing),
+            "torch_compile": bool(config.use_torch_compile),
+            "num_workers": int(config.num_workers),
+        },
+        "latest_epoch": history[-1] if history else None,
+        "best": {
+            "val_clean_accuracy": _best_history_value(history, lambda item: (item.get("val_clean") or {}).get("accuracy")),
+            "val_robust_accuracy": _best_history_value(history, lambda item: (item.get("val_robust") or {}).get("accuracy")),
+            "val_verification_auc": _best_history_value(history, lambda item: (item.get("val_verification") or {}).get("roc_auc")),
+            "throughput_global_img_s": _best_history_value(history, lambda item: (item.get("performance") or {}).get("global_img_s")),
+        },
     }
     if _is_primary():
         with (output_dir / "summary.json").open("w", encoding="utf-8") as handle:

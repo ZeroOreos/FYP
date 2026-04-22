@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 import torch.nn.functional as F
@@ -17,6 +18,14 @@ class AttackResult:
     policy_name: str
     family: str
     cached_hits: int = 0
+
+
+@dataclass
+class AttackCache:
+    clean_target_embeddings: torch.Tensor | None = None
+    clean_surrogate_embeddings: dict[str, torch.Tensor] = field(default_factory=dict)
+    bpfa_view_specs: list["FeatureAugmentSpec"] | None = None
+    bpfa_clean_view_embeddings: list[torch.Tensor] | None = None
 
 
 @dataclass
@@ -79,6 +88,26 @@ def enabled_attack_policies(policies: list[AttackPolicy]) -> list[AttackPolicy]:
     return [policy for policy in policies if policy.enabled and policy.weight > 0]
 
 
+def _autocast_disabled(device: torch.device):
+    if device.type in {"cuda", "cpu"}:
+        return torch.autocast(device_type=device.type, enabled=False)
+    return contextlib.nullcontext()
+
+
+def _target_training_outputs(
+    target_model: TrainableRecognizer,
+    images: torch.Tensor,
+    labels: torch.Tensor,
+) -> dict[str, torch.Tensor | dict[str, dict[str, torch.Tensor]]]:
+    if hasattr(target_model, "forward_attack_outputs"):
+        outputs = target_model.forward_attack_outputs(images, labels)
+    else:
+        outputs = target_model(images, labels)
+    if not isinstance(outputs, dict):
+        raise RuntimeError("Target model forward() must return a training output dictionary for attacks.")
+    return outputs
+
+
 def _surrogate_embedding_loss(
     *,
     policy: AttackPolicy,
@@ -87,6 +116,8 @@ def _surrogate_embedding_loss(
     target_model: TrainableRecognizer,
     labels: torch.Tensor,
     surrogates: dict[str, SurrogateWrapper],
+    cache: AttackCache | None = None,
+    target_outputs: dict[str, torch.Tensor | dict[str, dict[str, torch.Tensor]]] | None = None,
 ) -> torch.Tensor:
     weights = policy.surrogate_weights or {"target": 1.0}
     total = torch.zeros((), device=adv_images.device)
@@ -96,15 +127,25 @@ def _surrogate_embedding_loss(
         if weight <= 0:
             continue
         if name == "target":
-            logits, _ = target_model.forward_logits(adv_images, labels)
-            total = total + float(weight) * F.cross_entropy(logits, labels)
+            resolved_outputs = target_outputs
+            if resolved_outputs is None:
+                resolved_outputs = _target_training_outputs(target_model, adv_images, labels)
+            logits = resolved_outputs["logits"]
+            loss_labels = resolved_outputs.get("loss_labels", labels)
+            total = total + float(weight) * F.cross_entropy(logits, loss_labels)
             weight_sum += float(weight)
             continue
 
         surrogate = surrogates.get(name)
         if surrogate is None:
             continue
-        clean_embeddings = surrogate.embed(clean_images).detach()
+        if cache is not None and name in cache.clean_surrogate_embeddings:
+            clean_embeddings = cache.clean_surrogate_embeddings[name]
+        else:
+            with torch.no_grad():
+                clean_embeddings = surrogate.embed(clean_images).detach()
+            if cache is not None:
+                cache.clean_surrogate_embeddings[name] = clean_embeddings
         adv_embeddings = surrogate.embed(adv_images)
         cosine = F.cosine_similarity(
             F.normalize(adv_embeddings, dim=1),
@@ -124,10 +165,12 @@ def _cw_margin_loss(
     labels: torch.Tensor,
     target_model: TrainableRecognizer,
 ) -> torch.Tensor:
-    logits, _ = target_model.forward_logits(adv_images, labels)
-    true_logits = logits.gather(1, labels.view(-1, 1)).squeeze(1)
+    outputs = _target_training_outputs(target_model, adv_images, labels)
+    logits = outputs["logits"]
+    loss_labels = outputs.get("loss_labels", labels)
+    true_logits = logits.gather(1, loss_labels.view(-1, 1)).squeeze(1)
     masked_logits = logits.clone()
-    masked_logits.scatter_(1, labels.view(-1, 1), -1e9)
+    masked_logits.scatter_(1, loss_labels.view(-1, 1), -1e9)
     max_other = masked_logits.max(dim=1).values
     return (max_other - true_logits).mean()
 
@@ -170,21 +213,41 @@ def _affine_jitter(
     return transformed
 
 
-def _sample_feature_augmented_views(images: torch.Tensor, *, views: int) -> list[torch.Tensor]:
-    augmented: list[torch.Tensor] = []
+@dataclass(frozen=True)
+class FeatureAugmentSpec:
+    scale: float
+    translate_x: float
+    translate_y: float
+    flip: bool
+    blur: bool
+
+
+def _sample_feature_augment_specs(images: torch.Tensor, *, views: int) -> list[FeatureAugmentSpec]:
+    sampled: list[FeatureAugmentSpec] = []
     for _ in range(max(1, views)):
-        scale = float(1.0 + torch.empty((), device=images.device).uniform_(-0.08, 0.08).item())
-        translate_x = float(torch.empty((), device=images.device).uniform_(-0.04, 0.04).item())
-        translate_y = float(torch.empty((), device=images.device).uniform_(-0.04, 0.04).item())
-        flip = bool(torch.rand((), device=images.device).item() > 0.5)
+        sampled.append(
+            FeatureAugmentSpec(
+                scale=float(1.0 + torch.empty((), device=images.device).uniform_(-0.08, 0.08).item()),
+                translate_x=float(torch.empty((), device=images.device).uniform_(-0.04, 0.04).item()),
+                translate_y=float(torch.empty((), device=images.device).uniform_(-0.04, 0.04).item()),
+                flip=bool(torch.rand((), device=images.device).item() > 0.5),
+                blur=bool(torch.rand((), device=images.device).item() > 0.5),
+            )
+        )
+    return sampled
+
+
+def _apply_feature_augment_specs(images: torch.Tensor, specs: list[FeatureAugmentSpec]) -> list[torch.Tensor]:
+    augmented: list[torch.Tensor] = []
+    for spec in specs:
         view = _affine_jitter(
             images,
-            scale=scale,
-            translate_x=translate_x,
-            translate_y=translate_y,
-            flip=flip,
+            scale=spec.scale,
+            translate_x=spec.translate_x,
+            translate_y=spec.translate_y,
+            flip=spec.flip,
         )
-        if bool(torch.rand((), device=images.device).item() > 0.5):
+        if spec.blur:
             view = F.avg_pool2d(view, kernel_size=3, stride=1, padding=1)
         augmented.append(view)
     return augmented
@@ -198,7 +261,9 @@ def _bpfa_loss(
     target_model: TrainableRecognizer,
     labels: torch.Tensor,
     surrogates: dict[str, SurrogateWrapper],
+    cache: AttackCache | None = None,
 ) -> torch.Tensor:
+    base_adv_outputs = _target_training_outputs(target_model, adv_images, labels)
     ce_loss = _surrogate_embedding_loss(
         policy=policy,
         adv_images=adv_images,
@@ -206,22 +271,88 @@ def _bpfa_loss(
         target_model=target_model,
         labels=labels,
         surrogates=surrogates,
+        cache=cache,
+        target_outputs=base_adv_outputs,
     )
-    augmented_adv = _sample_feature_augmented_views(adv_images, views=3)
-    augmented_clean = _sample_feature_augmented_views(clean_images, views=3)
+    if cache is not None and cache.bpfa_view_specs is not None:
+        view_specs = cache.bpfa_view_specs
+    else:
+        view_specs = _sample_feature_augment_specs(clean_images, views=3)
+        if cache is not None:
+            cache.bpfa_view_specs = view_specs
+    augmented_adv = _apply_feature_augment_specs(adv_images, view_specs)
 
     transfer_loss = torch.zeros((), device=adv_images.device)
-    for adv_view, clean_view in zip(augmented_adv, augmented_clean):
-        clean_embeddings = target_model.forward_embeddings(clean_view).detach()
-        adv_logits, adv_embeddings = target_model.forward_logits(adv_view, labels)
+    if cache is not None and cache.bpfa_clean_view_embeddings is not None:
+        clean_view_embeddings = cache.bpfa_clean_view_embeddings
+    else:
+        augmented_clean = _apply_feature_augment_specs(clean_images, view_specs)
+        clean_view_embeddings = []
+        with torch.no_grad():
+            for clean_view in augmented_clean:
+                clean_view_embeddings.append(target_model.forward_embeddings(clean_view).detach())
+        if cache is not None:
+            cache.bpfa_clean_view_embeddings = clean_view_embeddings
+
+    for adv_view, clean_embeddings in zip(augmented_adv, clean_view_embeddings):
+        adv_outputs = _target_training_outputs(target_model, adv_view, labels)
+        adv_logits = adv_outputs["logits"]
+        adv_loss_labels = adv_outputs.get("loss_labels", labels)
+        adv_embeddings = adv_outputs["embeddings"]
         cosine = F.cosine_similarity(
             F.normalize(adv_embeddings, dim=1),
             F.normalize(clean_embeddings, dim=1),
             dim=1,
         )
-        transfer_loss = transfer_loss + 0.5 * F.cross_entropy(adv_logits, labels) + 0.5 * (1.0 - cosine).mean()
+        transfer_loss = transfer_loss + 0.5 * F.cross_entropy(adv_logits, adv_loss_labels) + 0.5 * (1.0 - cosine).mean()
     transfer_loss = transfer_loss / float(max(1, len(augmented_adv)))
     return 0.4 * ce_loss + 0.6 * transfer_loss
+
+
+def _restart_objective_score(
+    *,
+    policy: AttackPolicy,
+    adv_images: torch.Tensor,
+    clean_images: torch.Tensor,
+    target_model: TrainableRecognizer,
+    labels: torch.Tensor,
+    surrogates: dict[str, SurrogateWrapper],
+    cache: AttackCache | None,
+    objective: str,
+) -> torch.Tensor:
+    if objective == "bpfa":
+        return _bpfa_loss(
+            policy=policy,
+            adv_images=adv_images,
+            clean_images=clean_images,
+            target_model=target_model,
+            labels=labels,
+            surrogates=surrogates,
+            cache=cache,
+        )
+    if objective == "pgd":
+        return _surrogate_embedding_loss(
+            policy=policy,
+            adv_images=adv_images,
+            clean_images=clean_images,
+            target_model=target_model,
+            labels=labels,
+            surrogates=surrogates,
+            cache=cache,
+        )
+    if objective == "dfanet":
+        return _dfanet_loss(
+            policy=policy,
+            adv_images=adv_images,
+            clean_images=clean_images,
+            target_model=target_model,
+            labels=labels,
+            surrogates=surrogates,
+            cache=cache,
+        )
+    if objective == "cw":
+        return _cw_margin_loss(adv_images, labels, target_model)
+    raise ValueError(f"Unsupported PGD-like attack objective '{objective}'.")
 
 
 def _dfanet_loss(
@@ -232,9 +363,19 @@ def _dfanet_loss(
     target_model: TrainableRecognizer,
     labels: torch.Tensor,
     surrogates: dict[str, SurrogateWrapper],
+    cache: AttackCache | None = None,
 ) -> torch.Tensor:
-    logits, adv_embeddings = target_model.forward_logits(adv_images, labels)
-    clean_embeddings = target_model.forward_embeddings(clean_images).detach()
+    outputs = _target_training_outputs(target_model, adv_images, labels)
+    logits = outputs["logits"]
+    adv_loss_labels = outputs.get("loss_labels", labels)
+    adv_embeddings = outputs["embeddings"]
+    if cache is not None and cache.clean_target_embeddings is not None:
+        clean_embeddings = cache.clean_target_embeddings
+    else:
+        with torch.no_grad():
+            clean_embeddings = target_model.forward_embeddings(clean_images).detach()
+        if cache is not None:
+            cache.clean_target_embeddings = clean_embeddings
 
     feature_loss = torch.zeros((), device=adv_images.device)
     for _ in range(3):
@@ -251,8 +392,10 @@ def _dfanet_loss(
         target_model=target_model,
         labels=labels,
         surrogates=surrogates,
+        cache=cache,
+        target_outputs=outputs,
     )
-    return 0.35 * F.cross_entropy(logits, labels) + 0.45 * feature_loss + 0.20 * ensemble_loss
+    return 0.35 * F.cross_entropy(logits, adv_loss_labels) + 0.45 * feature_loss + 0.20 * ensemble_loss
 
 
 def _pgd_like_attack(
@@ -267,90 +410,76 @@ def _pgd_like_attack(
     clean_images = images.detach()
     best_adv = clean_images.clone().detach()
     best_loss = None
+    cache = AttackCache()
 
-    for restart_index in range(max(1, policy.restarts)):
-        if policy.random_start:
-            noise = torch.empty_like(clean_images).uniform_(-policy.eps, policy.eps)
-            adv = torch.clamp(clean_images + noise, min=0.0, max=1.0).detach()
-        else:
-            adv = clean_images.clone().detach()
-
-        for _ in range(max(1, policy.steps)):
-            adv.requires_grad_(True)
-            if objective == "pgd":
-                loss = _surrogate_embedding_loss(
-                    policy=policy,
-                    adv_images=adv,
-                    clean_images=clean_images,
-                    target_model=target_model,
-                    labels=labels,
-                    surrogates=surrogates,
-                )
-            elif objective == "bpfa":
-                loss = _bpfa_loss(
-                    policy=policy,
-                    adv_images=adv,
-                    clean_images=clean_images,
-                    target_model=target_model,
-                    labels=labels,
-                    surrogates=surrogates,
-                )
-            elif objective == "dfanet":
-                loss = _dfanet_loss(
-                    policy=policy,
-                    adv_images=adv,
-                    clean_images=clean_images,
-                    target_model=target_model,
-                    labels=labels,
-                    surrogates=surrogates,
-                )
-            elif objective == "cw":
-                loss = _cw_margin_loss(adv, labels, target_model)
+    with _autocast_disabled(clean_images.device):
+        attack_clean_images = clean_images.float()
+        attack_labels = labels
+        for restart_index in range(max(1, policy.restarts)):
+            if policy.random_start:
+                noise = torch.empty_like(attack_clean_images).uniform_(-policy.eps, policy.eps)
+                adv = torch.clamp(attack_clean_images + noise, min=0.0, max=1.0).detach()
             else:
-                raise ValueError(f"Unsupported PGD-like attack objective '{objective}'.")
-            gradient = torch.autograd.grad(loss, adv)[0]
-            adv = adv.detach() + policy.alpha * gradient.sign()
-            delta = torch.clamp(adv - clean_images, min=-policy.eps, max=policy.eps)
-            adv = torch.clamp(clean_images + delta, min=0.0, max=1.0).detach()
+                adv = attack_clean_images.clone().detach()
 
-        with torch.no_grad():
-            if objective == "pgd":
-                restart_loss = _surrogate_embedding_loss(
-                    policy=policy,
-                    adv_images=adv,
-                    clean_images=clean_images,
-                    target_model=target_model,
-                    labels=labels,
-                    surrogates=surrogates,
-                )
-            elif objective == "bpfa":
-                restart_loss = _bpfa_loss(
-                    policy=policy,
-                    adv_images=adv,
-                    clean_images=clean_images,
-                    target_model=target_model,
-                    labels=labels,
-                    surrogates=surrogates,
-                )
-            elif objective == "dfanet":
-                restart_loss = _dfanet_loss(
-                    policy=policy,
-                    adv_images=adv,
-                    clean_images=clean_images,
-                    target_model=target_model,
-                    labels=labels,
-                    surrogates=surrogates,
-                )
-            elif objective == "cw":
-                restart_loss = _cw_margin_loss(adv, labels, target_model)
-            else:
-                raise ValueError(f"Unsupported PGD-like attack objective '{objective}'.")
-            if best_loss is None or restart_loss.item() > best_loss:
-                best_loss = restart_loss.item()
-                best_adv = adv.detach()
+            for _ in range(max(1, policy.steps)):
+                adv.requires_grad_(True)
+                if objective == "pgd":
+                    loss = _surrogate_embedding_loss(
+                        policy=policy,
+                        adv_images=adv,
+                        clean_images=attack_clean_images,
+                        target_model=target_model,
+                        labels=attack_labels,
+                        surrogates=surrogates,
+                        cache=cache,
+                    )
+                elif objective == "bpfa":
+                    loss = _bpfa_loss(
+                        policy=policy,
+                        adv_images=adv,
+                        clean_images=attack_clean_images,
+                        target_model=target_model,
+                        labels=attack_labels,
+                        surrogates=surrogates,
+                        cache=cache,
+                    )
+                elif objective == "dfanet":
+                    loss = _dfanet_loss(
+                        policy=policy,
+                        adv_images=adv,
+                        clean_images=attack_clean_images,
+                        target_model=target_model,
+                        labels=attack_labels,
+                        surrogates=surrogates,
+                        cache=cache,
+                    )
+                elif objective == "cw":
+                    loss = _cw_margin_loss(adv, attack_labels, target_model)
+                else:
+                    raise ValueError(f"Unsupported PGD-like attack objective '{objective}'.")
+                gradient = torch.autograd.grad(loss, adv)[0]
+                adv = adv.detach() + policy.alpha * gradient.sign()
+                delta = torch.clamp(adv - attack_clean_images, min=-policy.eps, max=policy.eps)
+                adv = torch.clamp(attack_clean_images + delta, min=0.0, max=1.0).detach()
 
-        if restart_index + 1 >= max(1, policy.restarts):
-            break
+            with torch.no_grad():
+                restart_loss = _restart_objective_score(
+                    policy=policy,
+                    adv_images=adv,
+                    clean_images=attack_clean_images,
+                    target_model=target_model,
+                    labels=attack_labels,
+                    surrogates=surrogates,
+                    cache=cache,
+                    objective=objective,
+                )
+                if best_loss is None or restart_loss.item() > best_loss:
+                    best_loss = restart_loss.item()
+                    best_adv = adv.detach()
+
+            if restart_index + 1 >= max(1, policy.restarts):
+                break
 
     return best_adv
 
@@ -365,6 +494,7 @@ def generate_attack_batch(
     target_model: TrainableRecognizer,
     surrogates: dict[str, SurrogateWrapper],
     device: torch.device,
+    attack_chunk_size: int | None = None,
 ) -> AttackResult:
     if policy.kind == "cached":
         cached_batch, hits = load_cached_adversarial_batch(
@@ -376,6 +506,40 @@ def generate_attack_batch(
         if cached_batch is None:
             return AttackResult(images=images.detach(), policy_name=policy.name, family=policy.family, cached_hits=hits)
         return AttackResult(images=cached_batch, policy_name=policy.name, family=policy.family, cached_hits=hits)
+
+    chunk_size = None if attack_chunk_size is None else max(1, int(attack_chunk_size))
+    if chunk_size is not None and images.shape[0] > chunk_size:
+        adv_chunks: list[torch.Tensor] = []
+        total_hits = 0
+        start = 0
+        total = int(images.shape[0])
+        while start < total:
+            remaining = total - start
+            current_chunk_size = min(chunk_size, remaining)
+            # Avoid a trailing singleton chunk for training-time BatchNorm paths.
+            if remaining > chunk_size and (remaining - current_chunk_size) == 1 and current_chunk_size > 2:
+                current_chunk_size -= 1
+            end = start + current_chunk_size
+            chunk_result = generate_attack_batch(
+                policy=policy,
+                images=images[start:end],
+                labels=labels[start:end],
+                rel_paths=rel_paths[start:end],
+                image_size=image_size,
+                target_model=target_model,
+                surrogates=surrogates,
+                device=device,
+                attack_chunk_size=None,
+            )
+            adv_chunks.append(chunk_result.images)
+            total_hits += int(chunk_result.cached_hits)
+            start = end
+        return AttackResult(
+            images=torch.cat(adv_chunks, dim=0),
+            policy_name=policy.name,
+            family=policy.family,
+            cached_hits=total_hits,
+        )
 
     policy_name = policy.name.lower()
     if policy_name == "pgd":

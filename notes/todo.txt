@@ -99,7 +99,11 @@ Interpretation rule
 - `[IN PROGRESS]` run the full three-recognizer joint-pool condition under the final attacker design
 - `[NOT DONE]` test curriculum as a real experiment
 - `[NOT DONE]` compare `ArcFace`, `CosFace`, and `CurricularFace` clean and robust behavior under one fixed training contract
-- `[NOT DONE]` start the serious `WebFace4M` `ArcFace` `iResNet100` run after the full local shard pull finishes
+- `[IN PROGRESS]` start the serious `WebFace4M` `ArcFace` `iResNet100` run after the full local shard pull finishes
+- `[DONE]` make the serious CUDA path render server-local configs and launch cleanly through `uv` plus `torchrun`
+- `[DONE]` add gradient accumulation support to the serious training loop and server config renderer
+- `[NOT DONE]` make the serious `iResNet100` server run stable under real DDP with `SyncBatchNorm` and memory-safe per-rank batch sizing
+- `[NOT DONE]` confirm whether extracted JPEG loading is actually faster than shard-backed manifest loading on the target server before committing more disk to extraction
 - `[DONE]` run a low-epoch `WebFace4M` subset-backed `MPS` verification run on `ResNet18`
 - `[NOT DONE]` add the switchable `MPS` versus `CUDA` tuned run configs for the same `WebFace4M` training contract
 

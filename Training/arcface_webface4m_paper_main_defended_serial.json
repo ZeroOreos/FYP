@@ -1,13 +1,13 @@
 {
   "train_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/WebFace4M/manifests/train.jsonl",
   "val_dir": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/WebFace4M/manifests/val.jsonl",
-  "output_dir": "/Users/jeromeharianto/Documents/School2/FYP/TrainingRuns/joint-no-transfer",
+  "output_dir": "/Users/jeromeharianto/Documents/School2/FYP/TrainingRuns/serial-main",
   "resume_from": null,
   "dataset_fraction": 1.0,
   "dataset_subset_seed": 42,
   "dataset_min_images_per_identity": 2,
-  "target_model": "joint_pool",
-  "recognizers_mode": "joint_train",
+  "target_model": "arcface",
+  "recognizers_mode": "serial_target",
   "runtime_profile": "paper_full",
   "target_backbone": "iresnet100",
   "surrogate_models": [
@@ -16,7 +16,7 @@
   "attack_sampling_strategy": "family_round_robin",
   "batch_size": 64,
   "clean_warmup_batch_size": 128,
-  "shallow_adv_batch_size": 40,
+  "shallow_adv_batch_size": 32,
   "full_adv_batch_size": 32,
   "attack_chunk_size": 32,
   "epochs": 24,
@@ -44,13 +44,16 @@
   "clean_only": false,
   "use_mixed_precision": true,
   "use_gradient_checkpointing": false,
-  "use_channels_last": true,
   "use_distributed": true,
   "distributed_backend": "nccl",
   "use_sync_batchnorm": true,
   "optimizer_name": "sgd",
   "momentum": 0.9,
-  "lr_milestones": [11, 18, 22],
+  "lr_milestones": [
+    11,
+    18,
+    22
+  ],
   "lr_gamma": 0.1,
   "arcface_scale": 64.0,
   "arcface_margin": 0.5,
@@ -62,11 +65,6 @@
   "alignment_landmarks": 5,
   "normalized_crop_size": 112,
   "dataset_name": "WebFace4M",
-  "joint_pool_member_weights": {
-    "arcface": 0.4,
-    "cosface": 0.3,
-    "curricularface": 0.3
-  },
   "val_pairs_path": null,
   "test_dir": null,
   "test_pairs_path": null,
@@ -91,7 +89,10 @@
   "shallow_attack_alpha_scale": 0.5,
   "shallow_attack_step_scale": 0.5,
   "shallow_attack_restart_cap": 1,
-  "shallow_attack_names": ["pgd", "bpfa"],
+  "shallow_attack_names": [
+    "pgd",
+    "bpfa"
+  ],
   "primary_attackers": [
     {
       "name": "pgd",
@@ -115,7 +116,7 @@
       "family": "primary_transfer",
       "kind": "online",
       "weight": 0.2,
-      "enabled": false,
+      "enabled": true,
       "eps": 0.03137254901960784,
       "alpha": 0.00196078431372549,
       "steps": 8,

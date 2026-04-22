@@ -1,3 +1,23 @@
+[project]
+name = "fyp-face-robustness"
+version = "0.1.0"
+requires-python = ">=3.8"
+dependencies = [
+    "facenet-pytorch",
+    "numpy",
+    "pillow",
+    "pytorch-lightning",
+    "pyyaml",
+    "scikit-learn",
+    "setuptools<81",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+compile = [
+    "triton; platform_system == 'Linux' and platform_machine == 'x86_64'",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py39"

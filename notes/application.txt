@@ -33,6 +33,17 @@ What exists now
 - a `WebFace4M` manifest-prep script for train and val JSONL generation
 - corrected identification metrics that use inference-time logits instead of label-margin training logits
 
+What is standard versus what is specialized here
+- Standard ingredients we are reusing rather than claiming as new: margin-loss face-recognition families (`ArcFace`, `CosFace`, `CurricularFace`), `SGD`, `Partial FC`, optional sub-center `ArcFace`, distributed PyTorch / `DDP`, `SyncBatchNorm`, gradient accumulation, mixed precision, clean evaluation, white-box adversarial training, and the current native primary attackers `PGD`, `BPFA`, and `DFANet`.
+- Standard data-engineering direction: manifest-backed training on aligned `WebFace4M`, optional server-side JPEG extraction behind the same manifest contract, and ordinary checkpoint / history / metrics artifact writing.
+- Specialized repo behavior: the defended recognizer target can be a jointly trained `joint_pool` over `ArcFace + CosFace + CurricularFace` instead of only a single recognizer.
+- Specialized repo behavior: the training contract uses an explicit `three_stage` depth schedule with clean warmup, shallow adversarial depth, and full adversarial depth instead of one fixed attack depth from epoch `1`.
+- Specialized repo behavior: primary attacker families are rotated by batch through an attack-policy sampler instead of blended uniformly into every batch.
+- Specialized repo behavior: ensemble-aware hard-pair mining is part of the defended update rule and is staged over training rather than kept fixed from the start.
+- Specialized repo behavior: the repo keeps a strict split between native in-loop primary attackers and cached external surrogate pressure.
+- Specialized repo behavior: shard-aware distributed sampling is implemented to preserve throughput on manifest-backed `WebFace4M` data.
+- Specialized repo behavior: run reporting is tuned for this repo, including structured epoch records in `metrics.jsonl`, explicit validation-loss fields in epoch summaries, and DDP-aware global progress display instead of rank-local progress percentages.
+
 What research says to do next
 - frame the system as adversarial recognizer training with a defended recognizer pool and an attack pool
 - keep the defended recognizer set compact and paper-legible instead of expanding into too many side families
@@ -135,6 +146,26 @@ Latest local tuning result
 - `WebFace4M` ingestion is now implemented in code
 - the repo is ready to bootstrap the shard set directly on the server
 - the server path can now either stream from shard manifests or prefer extracted JPEGs while keeping the same manifest contract
+
+Latest server-run implementation and obstacles
+- the first serious remote `WebFace4M` `ArcFace` `iResNet100` path is now wired through `uv`, `torchrun`, and rendered server-local configs instead of the older local-only assumption
+- `Training/config.py`, `Training/engine.py`, and `scripts/render_cloud_config.py` now support `gradient_accumulation_steps` so the serious CUDA path can keep a larger effective batch while reducing per-step memory pressure
+- the training loop now delays optimizer steps across microbatches and uses `DistributedDataParallel.no_sync()` on non-step microbatches to avoid unnecessary gradient synchronization during accumulation
+- the server workflow was validated far enough to confirm that `torch`, `torchrun`, the full `WebFace4M` shard set, and manifest-backed loading are all functioning in the remote environment
+- the remote `WebFace4M` data path currently exists under `/home/wen/data/FYP/Dataset/WebFace4M`, with shard files confirmed present on the server and manifest regeneration working when the correct target root is used
+- the original cloud bootstrap script assumption was too optimistic for this machine: `/shared/...` was not writable, and the server also had no outbound network path to download `WebFace4M` directly
+- the practical workaround was to treat the server dataset as an uploaded local asset rather than a remotely bootstrapped internet download
+- a local extraction attempt for `WebFace4M` JPEGs was started and then intentionally canceled; cleanup removed the partial `images/` tree and restored the local dataset folder to the shard-backed state
+- the serious `iResNet100` CUDA config currently starts cleanly under `torchrun`, but the original `batch_size=32` per GPU run hits CUDA OOM on `24GB` `RTX 4090 D` cards even before meaningful progress through epoch `1`
+- reducing to `batch_size=1` is not a valid fallback for this model as currently written because the backbone hits a training-time batch-normalization failure on tensors of shape `torch.Size([1, 512])`
+- the next serious server-side tuning path is therefore not just "smaller batch"; it is "real distributed training plus `SyncBatchNorm` plus accumulation", with `batch_size >= 2` per rank and the config explicitly setting `use_distributed=true` and `use_sync_batchnorm=true`
+- a key operational gotcha during debugging was that launching with `torchrun` alone is not enough for this repo; if the rendered JSON still says `use_distributed=false`, the run will report `world_size=8` but not actually take the intended internal DDP path
+- the current open risk is that `iResNet100` full-set training may still need additional memory or normalization tuning even after accumulation and true DDP are enabled, so the serious paper run is closer than before but not yet proven stable end to end
+
+Recent implementation notes
+- terminal logging was intentionally trimmed so batch-window reports still go to `train.log` on the configured interval, but they are no longer all echoed to the interactive terminal
+- epoch summaries now print validation-loss fields alongside the existing accuracy fields because validation loss is currently a more informative signal than the composite training loss alone
+- the training progress display was corrected to use global DDP sample counts rather than rank-`0` local counts, so low percentage-used readouts in distributed runs should now be treated as a resolved display bug rather than a data-coverage problem
 
 Do not pretend
 - the placeholder backbone is the paper result

@@ -9,6 +9,7 @@ import io
 import tarfile
 
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 from torchvision import transforms
 from tqdm.auto import tqdm
@@ -21,7 +22,34 @@ from Training.recognizers import SurrogateWrapper, TrainableRecognizer
 
 _TO_TENSOR = transforms.ToTensor()
 _TAR_CACHE: dict[Path, tarfile.TarFile] = {}
-_DEFAULT_FAR_TARGETS = (1e-2, 1e-3, 1e-4)
+_DEFAULT_FAR_TARGETS = (1e-2, 1e-3, 1e-4, 1e-5)
+
+
+def _distributed_enabled() -> bool:
+    return dist.is_available() and dist.is_initialized()
+
+
+def _reduce_scalar_sums(values: list[float], device: torch.device) -> list[float]:
+    tensor = torch.as_tensor(values, dtype=torch.float64, device=device)
+    if _distributed_enabled():
+        dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+    return [float(item) for item in tensor.tolist()]
+
+
+def _reduce_member_totals(
+    totals: dict[str, dict[str, float]],
+    device: torch.device,
+) -> dict[str, dict[str, float]]:
+    if not _distributed_enabled():
+        return totals
+    names = sorted(totals)
+    for name in names:
+        bucket = totals[name]
+        keys = ["loss", "accuracy", "correct", "samples", "batches"]
+        reduced = _reduce_scalar_sums([float(bucket[key]) for key in keys], device)
+        for key, value in zip(keys, reduced):
+            bucket[key] = value
+    return totals
 
 
 def _empty_member_totals() -> dict[str, dict[str, float]]:
@@ -31,7 +59,7 @@ def _empty_member_totals() -> dict[str, dict[str, float]]:
 def _accumulate_member_metrics(
     totals: dict[str, dict[str, float]],
     logits_by_member: dict[str, torch.Tensor],
-    labels: torch.Tensor,
+    labels: torch.Tensor | dict[str, torch.Tensor],
 ) -> None:
     for name, logits in logits_by_member.items():
         bucket = totals.setdefault(
@@ -44,12 +72,13 @@ def _accumulate_member_metrics(
                 "batches": 0.0,
             },
         )
-        loss = F.cross_entropy(logits, labels)
+        member_labels = labels[name] if isinstance(labels, dict) else labels
+        loss = F.cross_entropy(logits, member_labels)
         predictions = logits.argmax(dim=1)
         bucket["loss"] += float(loss.item())
-        bucket["accuracy"] += classification_accuracy(logits, labels)
-        bucket["correct"] += float((predictions == labels).sum().item())
-        bucket["samples"] += float(labels.numel())
+        bucket["accuracy"] += classification_accuracy(logits, member_labels)
+        bucket["correct"] += float((predictions == member_labels).sum().item())
+        bucket["samples"] += float(member_labels.numel())
         bucket["batches"] += 1.0
 
 
@@ -64,6 +93,185 @@ def _finalize_member_metrics(totals: dict[str, dict[str, float]]) -> dict[str, d
             "samples": bucket["samples"],
         }
     return finalized
+
+
+def _member_logits_from_training_outputs(
+    outputs: dict[str, torch.Tensor | dict[str, dict[str, torch.Tensor]]],
+) -> dict[str, torch.Tensor]:
+    member_outputs = outputs.get("member_outputs")
+    if not isinstance(member_outputs, dict):
+        return {}
+    member_logits: dict[str, torch.Tensor] = {}
+    for name, item in member_outputs.items():
+        predict_logits = item.get("predict_logits")
+        if isinstance(predict_logits, torch.Tensor):
+            member_logits[name] = predict_logits
+    return member_logits
+
+
+def _member_loss_labels_from_training_outputs(
+    outputs: dict[str, torch.Tensor | dict[str, dict[str, torch.Tensor]]],
+) -> dict[str, torch.Tensor]:
+    member_outputs = outputs.get("member_outputs")
+    if not isinstance(member_outputs, dict):
+        return {}
+    member_labels: dict[str, torch.Tensor] = {}
+    for name, item in member_outputs.items():
+        loss_labels = item.get("loss_labels")
+        if isinstance(loss_labels, torch.Tensor):
+            member_labels[name] = loss_labels
+    return member_labels
+
+
+def _calibration_metrics(
+    probs: torch.Tensor,
+    labels: torch.Tensor,
+    *,
+    bins: int = 15,
+) -> dict[str, float | list[dict[str, float]]]:
+    if probs.numel() == 0:
+        return {
+            "ece": 0.0,
+            "brier": 0.0,
+            "nll": 0.0,
+            "mean_confidence": 0.0,
+            "reliability_bins": [],
+        }
+
+    confidence, predictions = probs.max(dim=1)
+    correctness = (predictions == labels).float()
+    one_hot = F.one_hot(labels, num_classes=probs.size(1)).to(dtype=probs.dtype)
+    brier = float(((probs - one_hot) ** 2).sum(dim=1).mean().item())
+    nll = float(F.nll_loss(torch.log(probs.clamp_min(1e-12)), labels).item())
+
+    edges = torch.linspace(0.0, 1.0, steps=bins + 1, device=probs.device)
+    ece = torch.zeros((), dtype=probs.dtype, device=probs.device)
+    reliability_bins: list[dict[str, float]] = []
+    total = max(1, labels.numel())
+    for index in range(bins):
+        lower = edges[index]
+        upper = edges[index + 1]
+        if index + 1 == bins:
+            mask = (confidence >= lower) & (confidence <= upper)
+        else:
+            mask = (confidence >= lower) & (confidence < upper)
+        count = int(mask.sum().item())
+        if count == 0:
+            reliability_bins.append(
+                {
+                    "bin_start": float(lower.item()),
+                    "bin_end": float(upper.item()),
+                    "count": 0.0,
+                    "accuracy": 0.0,
+                    "confidence": 0.0,
+                }
+            )
+            continue
+        bin_acc = correctness[mask].mean()
+        bin_conf = confidence[mask].mean()
+        ece = ece + (mask.float().mean() * torch.abs(bin_acc - bin_conf))
+        reliability_bins.append(
+            {
+                "bin_start": float(lower.item()),
+                "bin_end": float(upper.item()),
+                "count": float(count),
+                "accuracy": float(bin_acc.item()),
+                "confidence": float(bin_conf.item()),
+            }
+        )
+
+    return {
+        "ece": float(ece.item()),
+        "brier": brier,
+        "nll": nll,
+        "mean_confidence": float(confidence.mean().item()),
+        "reliability_bins": reliability_bins,
+    }
+
+
+def _collect_pairwise_error_stats(
+    logits_by_member: dict[str, torch.Tensor],
+    labels: torch.Tensor,
+) -> dict[str, object]:
+    member_names = sorted(logits_by_member)
+    if len(member_names) < 2:
+        return {
+            "pairwise_error_correlation_mean": 0.0,
+            "pairwise_error_correlation_by_pair": {},
+        }
+
+    error_vectors: dict[str, torch.Tensor] = {}
+    for name, logits in logits_by_member.items():
+        error_vectors[name] = (logits.argmax(dim=1) != labels).float()
+
+    correlations: dict[str, float] = {}
+    values: list[float] = []
+    for left_index, left_name in enumerate(member_names):
+        left_errors = error_vectors[left_name]
+        left_centered = left_errors - left_errors.mean()
+        left_std = left_centered.pow(2).mean().sqrt()
+        for right_name in member_names[left_index + 1:]:
+            right_errors = error_vectors[right_name]
+            right_centered = right_errors - right_errors.mean()
+            right_std = right_centered.pow(2).mean().sqrt()
+            if float(left_std.item()) == 0.0 or float(right_std.item()) == 0.0:
+                corr = 0.0
+            else:
+                corr = float(((left_centered * right_centered).mean() / (left_std * right_std)).item())
+            key = f"{left_name}__{right_name}"
+            correlations[key] = corr
+            values.append(corr)
+
+    return {
+        "pairwise_error_correlation_mean": float(sum(values) / max(1, len(values))),
+        "pairwise_error_correlation_by_pair": correlations,
+    }
+
+
+def _ensemble_analysis(
+    *,
+    logits_by_member: dict[str, torch.Tensor],
+    fused_logits: torch.Tensor,
+    labels: torch.Tensor,
+) -> dict[str, object]:
+    if not logits_by_member:
+        return {}
+
+    member_names = sorted(logits_by_member)
+    member_accuracies = {
+        name: classification_accuracy(logits, labels)
+        for name, logits in logits_by_member.items()
+    }
+    fused_accuracy = classification_accuracy(fused_logits, labels)
+    mean_member_logits = torch.stack([logits_by_member[name] for name in member_names], dim=0).mean(dim=0)
+    mean_single_accuracy = classification_accuracy(mean_member_logits, labels)
+    best_single_name = max(member_accuracies, key=member_accuracies.get)
+    best_single_accuracy = member_accuracies[best_single_name]
+
+    leave_one_out: dict[str, dict[str, float]] = {}
+    if len(member_names) > 1:
+        for omitted in member_names:
+            kept = [logits_by_member[name] for name in member_names if name != omitted]
+            loo_logits = torch.stack(kept, dim=0).mean(dim=0)
+            loo_accuracy = classification_accuracy(loo_logits, labels)
+            leave_one_out[omitted] = {
+                "accuracy": loo_accuracy,
+                "gain_vs_leave_one_out": fused_accuracy - loo_accuracy,
+            }
+
+    analysis: dict[str, object] = {
+        "fused_accuracy": fused_accuracy,
+        "best_single_name": best_single_name,
+        "best_single_accuracy": best_single_accuracy,
+        "mean_single_accuracy": float(sum(member_accuracies.values()) / max(1, len(member_accuracies))),
+        "mean_member_logits_accuracy": mean_single_accuracy,
+        "gain_vs_best_single": fused_accuracy - best_single_accuracy,
+        "gain_vs_mean_single": fused_accuracy - (float(sum(member_accuracies.values()) / max(1, len(member_accuracies)))),
+        "member_accuracies": member_accuracies,
+        "leave_one_out": leave_one_out,
+    }
+    analysis.update(_collect_pairwise_error_stats(logits_by_member, labels))
+    return analysis
 
 
 def _load_image_from_reference(reference: Path | str) -> Image.Image:
@@ -97,7 +305,11 @@ def evaluate_clean(
     total_samples = 0
     total_correct = 0
     member_totals = _empty_member_totals()
+    all_probs = []
+    all_labels = []
+    fused_member_logits: list[dict[str, torch.Tensor]] = []
     batches = 0
+    distributed_eval = _distributed_enabled()
 
     iterator = loader
     if progress_desc is not None:
@@ -106,9 +318,21 @@ def evaluate_clean(
     for images, labels, _, _ in iterator:
         images = images.to(device, non_blocking=device.type == "cuda")
         labels = labels.to(device, non_blocking=device.type == "cuda")
-        logits = model.predict_logits(images)
-        if hasattr(model, "predict_member_logits"):
-            _accumulate_member_metrics(member_totals, model.predict_member_logits(images), labels)
+        if hasattr(model, "predict_eval_outputs"):
+            eval_outputs = model.predict_eval_outputs(images)
+            logits = eval_outputs["predict_logits"]
+            member_logits = eval_outputs.get("member_logits")
+        else:
+            logits = model.predict_logits(images)
+            member_logits = model.predict_member_logits(images) if hasattr(model, "predict_member_logits") else None
+        if not distributed_eval:
+            probs = torch.softmax(logits, dim=1)
+            all_probs.append(probs.detach().cpu())
+            all_labels.append(labels.detach().cpu())
+        if isinstance(member_logits, dict) and member_logits:
+            _accumulate_member_metrics(member_totals, member_logits, labels)
+            if not distributed_eval:
+                fused_member_logits.append({name: tensor.detach().cpu() for name, tensor in member_logits.items()})
         loss = F.cross_entropy(logits, labels)
         predictions = logits.argmax(dim=1)
         total_loss += float(loss.item())
@@ -120,12 +344,41 @@ def evaluate_clean(
 
     if batches == 0:
         return {"loss": 0.0, "accuracy": 0.0, "samples": 0.0, "correct": 0.0}
+    total_loss, total_batches, total_samples, total_correct = _reduce_scalar_sums(
+        [total_loss, float(total_batches), float(total_samples), float(total_correct)],
+        device,
+    )
+    member_totals = _reduce_member_totals(member_totals, device)
+    accuracy = float(total_correct) / float(max(1.0, total_samples))
+    ensemble_metrics: dict[str, object] = {}
+    calibration: dict[str, object] = {}
+    if not distributed_eval and fused_member_logits:
+        merged_logits: dict[str, list[torch.Tensor]] = {}
+        for batch_payload in fused_member_logits:
+            for name, tensor in batch_payload.items():
+                merged_logits.setdefault(name, []).append(tensor)
+        logits_by_member = {name: torch.cat(chunks, dim=0) for name, chunks in merged_logits.items()}
+        probs = torch.cat(all_probs, dim=0) if all_probs else torch.empty(0)
+        stacked_labels = torch.cat(all_labels, dim=0) if all_labels else torch.empty(0, dtype=torch.long)
+        fused_logits = torch.log(probs.clamp_min(1e-12))
+        ensemble_metrics = _ensemble_analysis(
+            logits_by_member=logits_by_member,
+            fused_logits=fused_logits,
+            labels=stacked_labels,
+        )
+        calibration = _calibration_metrics(probs, stacked_labels)
+    elif not distributed_eval:
+        probs = torch.cat(all_probs, dim=0) if all_probs else torch.empty(0)
+        stacked_labels = torch.cat(all_labels, dim=0) if all_labels else torch.empty(0, dtype=torch.long)
+        calibration = _calibration_metrics(probs, stacked_labels) if all_probs else _calibration_metrics(torch.empty((0, 1)), torch.empty(0, dtype=torch.long))
     return {
-        "loss": total_loss / batches,
-        "accuracy": total_acc / batches,
+        "loss": total_loss / max(1.0, total_batches),
+        "accuracy": accuracy,
         "samples": float(total_samples),
         "correct": float(total_correct),
         "member_metrics": _finalize_member_metrics(member_totals),
+        "calibration": calibration,
+        "ensemble": ensemble_metrics,
     }
 
 
@@ -137,6 +390,7 @@ def evaluate_robust(
     policy: AttackPolicy | None,
     surrogates: dict[str, SurrogateWrapper],
     image_size: int,
+    attack_chunk_size: int | None = None,
     progress_desc: str | None = None,
 ) -> dict[str, float]:
     if policy is None:
@@ -152,7 +406,11 @@ def evaluate_robust(
     total_clean_correct = 0
     total_success_from_clean_correct = 0
     member_totals = _empty_member_totals()
+    all_probs = []
+    all_labels = []
+    fused_member_logits: list[dict[str, torch.Tensor]] = []
     batches = 0
+    distributed_eval = _distributed_enabled()
 
     iterator = loader
     if progress_desc is not None:
@@ -170,17 +428,42 @@ def evaluate_robust(
             target_model=model,
             surrogates=surrogates,
             device=device,
+            attack_chunk_size=attack_chunk_size,
         )
 
         with torch.no_grad():
-            clean_embeddings = model.forward_embeddings(images)
-            clean_predict_logits = model.predict_logits_from_embeddings(clean_embeddings)
-            adv_logits, adv_embeddings = model.forward_logits(attack_result.images, labels)
-            adv_predict_logits = model.predict_logits_from_embeddings(adv_embeddings)
-            if hasattr(model, "predict_member_logits_from_embeddings"):
-                _accumulate_member_metrics(member_totals, model.predict_member_logits_from_embeddings(adv_embeddings), labels)
+            if hasattr(model, "predict_eval_outputs"):
+                clean_outputs = model.predict_eval_outputs(images)
+                clean_embeddings = clean_outputs["embeddings"]
+                clean_predict_logits = clean_outputs["predict_logits"]
+            else:
+                clean_embeddings = model.forward_embeddings(images)
+                clean_predict_logits = model.predict_logits_from_embeddings(clean_embeddings)
+            adv_outputs = model(attack_result.images, labels)
+            adv_logits = adv_outputs["logits"]
+            adv_loss_labels = adv_outputs.get("loss_labels", labels)
+            adv_embeddings = adv_outputs["embeddings"]
+            if hasattr(model, "predict_eval_outputs"):
+                adv_eval_outputs = model.predict_eval_outputs(attack_result.images)
+                adv_predict_logits = adv_eval_outputs["predict_logits"]
+                member_logits = adv_eval_outputs.get("member_logits") or {}
+            else:
+                adv_predict_logits = adv_outputs["predict_logits"]
+                member_logits = _member_logits_from_training_outputs(adv_outputs)
+            member_loss_labels = _member_loss_labels_from_training_outputs(adv_outputs)
+            if member_logits:
+                _accumulate_member_metrics(
+                    member_totals,
+                    member_logits,
+                    labels if hasattr(model, "predict_eval_outputs") else (member_loss_labels or labels),
+                )
+                if not distributed_eval:
+                    fused_member_logits.append({name: tensor.detach().cpu() for name, tensor in member_logits.items()})
 
-        loss = F.cross_entropy(adv_logits, labels)
+        loss = F.cross_entropy(adv_logits, adv_loss_labels)
+        if not distributed_eval:
+            all_probs.append(torch.softmax(adv_predict_logits, dim=1).detach().cpu())
+            all_labels.append(labels.detach().cpu())
         clean_predictions = clean_predict_logits.argmax(dim=1)
         adv_predictions = adv_predict_logits.argmax(dim=1)
         clean_correct_mask = clean_predictions == labels
@@ -206,17 +489,64 @@ def evaluate_robust(
             "clean_correct": 0.0,
             "attack_success_rate": 0.0,
         }
-    asr = float(total_success_from_clean_correct) / float(max(1, total_clean_correct))
+    (
+        total_loss,
+        total_consistency,
+        total_cached_hits,
+        total_samples,
+        total_correct,
+        total_clean_correct,
+        total_success_from_clean_correct,
+        batches,
+    ) = _reduce_scalar_sums(
+        [
+            total_loss,
+            total_consistency,
+            total_cached_hits,
+            float(total_samples),
+            float(total_correct),
+            float(total_clean_correct),
+            float(total_success_from_clean_correct),
+            float(batches),
+        ],
+        device,
+    )
+    member_totals = _reduce_member_totals(member_totals, device)
+    asr = float(total_success_from_clean_correct) / float(max(1.0, total_clean_correct))
+    accuracy = float(total_correct) / float(max(1.0, total_samples))
+    ensemble_metrics: dict[str, object] = {}
+    calibration: dict[str, object] = {}
+    if not distributed_eval and fused_member_logits:
+        merged_logits: dict[str, list[torch.Tensor]] = {}
+        for batch_payload in fused_member_logits:
+            for name, tensor in batch_payload.items():
+                merged_logits.setdefault(name, []).append(tensor)
+        logits_by_member = {name: torch.cat(chunks, dim=0) for name, chunks in merged_logits.items()}
+        probs = torch.cat(all_probs, dim=0) if all_probs else torch.empty(0)
+        stacked_labels = torch.cat(all_labels, dim=0) if all_labels else torch.empty(0, dtype=torch.long)
+        fused_logits = torch.log(probs.clamp_min(1e-12))
+        ensemble_metrics = _ensemble_analysis(
+            logits_by_member=logits_by_member,
+            fused_logits=fused_logits,
+            labels=stacked_labels,
+        )
+        calibration = _calibration_metrics(probs, stacked_labels)
+    elif not distributed_eval:
+        probs = torch.cat(all_probs, dim=0) if all_probs else torch.empty(0)
+        stacked_labels = torch.cat(all_labels, dim=0) if all_labels else torch.empty(0, dtype=torch.long)
+        calibration = _calibration_metrics(probs, stacked_labels) if all_probs else _calibration_metrics(torch.empty((0, 1)), torch.empty(0, dtype=torch.long))
     return {
-        "loss": total_loss / batches,
-        "accuracy": total_acc / batches,
-        "consistency": total_consistency / batches,
-        "cached_hits": total_cached_hits / batches,
+        "loss": total_loss / max(1.0, batches),
+        "accuracy": accuracy,
+        "consistency": total_consistency / max(1.0, batches),
+        "cached_hits": total_cached_hits / max(1.0, batches),
         "samples": float(total_samples),
         "correct": float(total_correct),
         "clean_correct": float(total_clean_correct),
         "attack_success_rate": asr,
         "member_metrics": _finalize_member_metrics(member_totals),
+        "calibration": calibration,
+        "ensemble": ensemble_metrics,
     }
 
 
@@ -228,7 +558,9 @@ def evaluate_robust_all(
     policies: list[AttackPolicy],
     surrogates: dict[str, SurrogateWrapper],
     image_size: int,
+    attack_chunk_size: int | None = None,
     progress_prefix: str | None = None,
+    distributed: bool = False,
 ) -> dict[str, object]:
     enabled = [policy for policy in policies if policy.enabled]
     if not enabled:
@@ -255,6 +587,7 @@ def evaluate_robust_all(
             policy=policy,
             surrogates=surrogates,
             image_size=image_size,
+            attack_chunk_size=attack_chunk_size,
             progress_desc=None if progress_prefix is None else f"{progress_prefix}:{policy.name}",
         )
 

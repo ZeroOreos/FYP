@@ -8,6 +8,7 @@ Surrogate attackers should be materialized into cached dataset roots and referen
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,9 +16,26 @@ if TYPE_CHECKING:
     from Training.config import EnsembleTrainingConfig
 
 
+def _sanitize_cuda_alloc_conf_env() -> None:
+    if os.environ.get("FYP_KEEP_EXPANDABLE_SEGMENTS", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return
+    raw = os.environ.get("PYTORCH_CUDA_ALLOC_CONF")
+    if not raw:
+        return
+    parts = [part.strip() for part in raw.split(",") if part.strip()]
+    filtered = [part for part in parts if not part.lower().startswith("expandable_segments:")]
+    if filtered == parts:
+        return
+    if filtered:
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = ",".join(filtered)
+    else:
+        os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Mode B ensemble face-recognition training.")
     parser.add_argument("--config", type=Path, default=None, help="Optional JSON config file.")
+    parser.add_argument("--resume-from", type=Path, default=None, help="Optional checkpoint to resume from.")
     parser.add_argument("--train-dir", type=Path, default=None, help="Training dataset root.")
     parser.add_argument("--val-dir", type=Path, default=None, help="Validation dataset root.")
     parser.add_argument("--output-dir", type=Path, default=None, help="Run output directory.")
@@ -26,6 +44,12 @@ def parse_args() -> argparse.Namespace:
         choices=("arcface", "cosface", "curricularface", "joint_pool"),
         default=None,
         help="Trainable margin-loss recognizer to run.",
+    )
+    parser.add_argument(
+        "--recognizers-mode",
+        choices=("serial_target", "joint_train"),
+        default=None,
+        help="Use serial_target for the mainline paper path; reserve joint_train for ablation/ceiling runs.",
     )
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
@@ -74,6 +98,10 @@ def build_config_from_args(args: argparse.Namespace) -> "EnsembleTrainingConfig"
         config.batch_size = int(args.batch_size)
     if args.target_model is not None:
         config.target_model = args.target_model
+        if args.target_model == "joint_pool" and args.recognizers_mode is None:
+            config.recognizers_mode = "joint_train"
+    if args.recognizers_mode is not None:
+        config.recognizers_mode = args.recognizers_mode
     if args.target_backbone is not None:
         config.target_backbone = args.target_backbone
     if args.device is not None:
@@ -101,11 +129,13 @@ def build_config_from_args(args: argparse.Namespace) -> "EnsembleTrainingConfig"
 
 
 def main() -> None:
+    _sanitize_cuda_alloc_conf_env()
     args = parse_args()
     config = build_config_from_args(args)
     from Training.engine import run_training
 
-    summary = run_training(config)
+    resume_from = args.resume_from.resolve() if args.resume_from is not None else config.resolved_resume_from()
+    summary = run_training(config, resume_from=resume_from)
     print(f"[INFO] Training complete: {summary['output_dir']}")
 
 

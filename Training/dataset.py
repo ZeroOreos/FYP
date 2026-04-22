@@ -251,6 +251,99 @@ class ShardAwareSampler(Sampler[int]):
         return len(self.dataset)
 
 
+class DistributedShardAwareSampler(Sampler[int]):
+    def __init__(
+        self,
+        dataset: WebFaceManifestDataset,
+        *,
+        num_replicas: int | None = None,
+        rank: int | None = None,
+        seed: int = 42,
+        drop_last: bool = True,
+    ) -> None:
+        if num_replicas is None:
+            if not torch.distributed.is_available() or not torch.distributed.is_initialized():
+                raise RuntimeError("DistributedShardAwareSampler requires an initialized distributed process group.")
+            num_replicas = torch.distributed.get_world_size()
+        if rank is None:
+            if not torch.distributed.is_available() or not torch.distributed.is_initialized():
+                raise RuntimeError("DistributedShardAwareSampler requires an initialized distributed process group.")
+            rank = torch.distributed.get_rank()
+        self.dataset = dataset
+        self.num_replicas = int(num_replicas)
+        self.rank = int(rank)
+        self.seed = int(seed)
+        self.drop_last = bool(drop_last)
+        grouped: dict[Path, list[int]] = {}
+        for index, sample in enumerate(dataset.samples):
+            grouped.setdefault(sample.shard_path, []).append(index)
+        self._groups = [indices for _, indices in sorted(grouped.items(), key=lambda item: str(item[0]))]
+        self._epoch = 0
+        dataset_size = len(self.dataset)
+        if self.drop_last:
+            self.num_samples = dataset_size // self.num_replicas
+            self.total_size = self.num_samples * self.num_replicas
+        else:
+            self.num_samples = int(math.ceil(dataset_size / float(self.num_replicas)))
+            self.total_size = self.num_samples * self.num_replicas
+
+    def set_epoch(self, epoch: int) -> None:
+        self._epoch = int(epoch)
+
+    def __iter__(self):
+        rng = random.Random(self.seed + self._epoch)
+        groups = [list(indices) for indices in self._groups]
+        rng.shuffle(groups)
+        ordered: list[int] = []
+        for indices in groups:
+            rng.shuffle(indices)
+            ordered.extend(indices)
+
+        if self.drop_last:
+            ordered = ordered[: self.total_size]
+        else:
+            if len(ordered) < self.total_size:
+                padding_size = self.total_size - len(ordered)
+                ordered.extend(ordered[:padding_size])
+            else:
+                ordered = ordered[: self.total_size]
+
+        start = self.rank * self.num_samples
+        end = start + self.num_samples
+        return iter(ordered[start:end])
+
+    def __len__(self) -> int:
+        return self.num_samples
+
+
+class DistributedEvalSampler(Sampler[int]):
+    def __init__(
+        self,
+        dataset: Dataset,
+        *,
+        num_replicas: int | None = None,
+        rank: int | None = None,
+    ) -> None:
+        if num_replicas is None:
+            if not torch.distributed.is_available() or not torch.distributed.is_initialized():
+                raise RuntimeError("DistributedEvalSampler requires an initialized distributed process group.")
+            num_replicas = torch.distributed.get_world_size()
+        if rank is None:
+            if not torch.distributed.is_available() or not torch.distributed.is_initialized():
+                raise RuntimeError("DistributedEvalSampler requires an initialized distributed process group.")
+            rank = torch.distributed.get_rank()
+        self.dataset = dataset
+        self.num_replicas = int(num_replicas)
+        self.rank = int(rank)
+        self.indices = list(range(self.rank, len(self.dataset), self.num_replicas))
+
+    def __iter__(self):
+        return iter(self.indices)
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+
 def _manifest_sidecar(manifest_path: Path, filename: str) -> Path:
     return manifest_path.resolve().parent / filename
 
@@ -299,6 +392,55 @@ def _collect_label_rel_paths(data_path: Path) -> dict[str, list[str]]:
     if _is_manifest_path(resolved):
         return _collect_manifest_rel_paths(resolved)
     return _collect_root_rel_paths(resolved)
+
+
+def _subset_plan_cache_path(
+    data_path: Path,
+    *,
+    fraction: float,
+    subset_seed: int,
+    min_images_per_identity: int,
+) -> Path:
+    resolved = data_path.resolve()
+    cache_root = resolved.parent if resolved.is_file() else resolved
+    fraction_tag = f"{float(fraction):.6f}".rstrip("0").rstrip(".") or "0"
+    filename = (
+        f"subset_cache_fraction-{fraction_tag}_seed-{int(subset_seed)}_min-{int(min_images_per_identity)}.json"
+    )
+    return cache_root / filename
+
+
+def _load_subset_plan_cache(cache_path: Path) -> DatasetSubsetPlan | None:
+    if not cache_path.exists():
+        return None
+    with cache_path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    raw_max_samples = payload.get("max_samples_per_identity") or {}
+    raw_selected_rel_paths = payload.get("selected_rel_paths") or {}
+    return DatasetSubsetPlan(
+        selected_labels=tuple(str(label) for label in payload["selected_labels"]),
+        max_samples_per_identity={str(key): int(value) for key, value in raw_max_samples.items()}
+        or None,
+        selected_rel_paths={
+            str(label): tuple(str(path) for path in paths)
+            for label, paths in raw_selected_rel_paths.items()
+        }
+        or None,
+    )
+
+
+def _save_subset_plan_cache(cache_path: Path, subset_plan: DatasetSubsetPlan) -> None:
+    payload = {
+        "selected_labels": list(subset_plan.selected_labels),
+        "max_samples_per_identity": subset_plan.max_samples_per_identity,
+        "selected_rel_paths": {
+            label: list(paths)
+            for label, paths in (subset_plan.selected_rel_paths or {}).items()
+        },
+    }
+    with cache_path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write("\n")
 
 
 def _identity_sort_key(item: tuple[str, list[str]]) -> tuple[int, str]:
@@ -402,6 +544,56 @@ def _build_dataset(
     return FaceTrainDataset(resolved, class_to_idx, image_size, subset_plan=subset_plan)
 
 
+def build_train_loader(
+    train_ds: Dataset,
+    *,
+    batch_size: int,
+    num_workers: int,
+    distributed: bool = False,
+    dataset_subset_seed: int = 42,
+    persistent_workers: bool = True,
+    prefetch_factor: int = 4,
+    pin_memory: bool = True,
+) -> DataLoader:
+    train_sampler = None
+    train_shuffle = True
+    if distributed:
+        if isinstance(train_ds, WebFaceManifestDataset):
+            train_sampler = DistributedShardAwareSampler(
+                train_ds,
+                seed=dataset_subset_seed,
+                drop_last=True,
+            )
+        else:
+            train_sampler = DistributedSampler(
+                train_ds,
+                shuffle=True,
+                drop_last=True,
+                seed=dataset_subset_seed,
+            )
+        train_shuffle = False
+    elif isinstance(train_ds, WebFaceManifestDataset):
+        train_sampler = ShardAwareSampler(train_ds, seed=dataset_subset_seed)
+        train_shuffle = False
+
+    loader_kwargs: dict[str, object] = {
+        "num_workers": num_workers,
+        "pin_memory": pin_memory and torch.cuda.is_available(),
+    }
+    if num_workers > 0:
+        loader_kwargs["persistent_workers"] = persistent_workers
+        loader_kwargs["prefetch_factor"] = max(2, int(prefetch_factor))
+
+    return DataLoader(
+        train_ds,
+        batch_size=batch_size,
+        shuffle=train_shuffle,
+        sampler=train_sampler,
+        drop_last=True,
+        **loader_kwargs,
+    )
+
+
 def build_dataloaders(
     train_dir: Path,
     val_dir: Path,
@@ -416,39 +608,38 @@ def build_dataloaders(
     prefetch_factor: int = 4,
     pin_memory: bool = True,
 ) -> tuple[Dataset, Dataset, DataLoader, DataLoader, dict[str, int]]:
-    train_grouped = _collect_label_rel_paths(train_dir)
-    val_grouped = _collect_label_rel_paths(val_dir)
-    overlap_labels = set(train_grouped) & set(val_grouped)
-    subset_source = (
-        {label: train_grouped[label] for label in sorted(overlap_labels)}
-        if overlap_labels
-        else train_grouped
-    )
-
-    train_subset_plan = _make_subset_plan(
-        subset_source,
+    cache_path = _subset_plan_cache_path(
+        train_dir,
         fraction=dataset_fraction,
         subset_seed=dataset_subset_seed,
         min_images_per_identity=dataset_min_images_per_identity,
     )
+    train_subset_plan = _load_subset_plan_cache(cache_path)
+    if train_subset_plan is None:
+        train_grouped = _collect_label_rel_paths(train_dir)
+        val_grouped = _collect_label_rel_paths(val_dir)
+        overlap_labels = set(train_grouped) & set(val_grouped)
+        subset_source = (
+            {label: train_grouped[label] for label in sorted(overlap_labels)}
+            if overlap_labels
+            else train_grouped
+        )
+
+        train_subset_plan = _make_subset_plan(
+            subset_source,
+            fraction=dataset_fraction,
+            subset_seed=dataset_subset_seed,
+            min_images_per_identity=dataset_min_images_per_identity,
+        )
+        _save_subset_plan_cache(cache_path, train_subset_plan)
     val_subset_plan = DatasetSubsetPlan(selected_labels=train_subset_plan.selected_labels)
     class_to_idx = build_class_to_idx(train_dir, subset_plan=train_subset_plan)
     train_ds = _build_dataset(train_dir, class_to_idx, image_size, subset_plan=train_subset_plan)
     val_ds = _build_dataset(val_dir, class_to_idx, image_size, subset_plan=val_subset_plan)
 
-    train_sampler = None
-    train_shuffle = True
+    val_sampler = None
     if distributed:
-        train_sampler = DistributedSampler(
-            train_ds,
-            shuffle=True,
-            drop_last=True,
-            seed=dataset_subset_seed,
-        )
-        train_shuffle = False
-    elif isinstance(train_ds, WebFaceManifestDataset):
-        train_sampler = ShardAwareSampler(train_ds, seed=dataset_subset_seed)
-        train_shuffle = False
+        val_sampler = DistributedEvalSampler(val_ds)
 
     loader_kwargs: dict[str, object] = {
         "num_workers": num_workers,
@@ -458,18 +649,21 @@ def build_dataloaders(
         loader_kwargs["persistent_workers"] = persistent_workers
         loader_kwargs["prefetch_factor"] = max(2, int(prefetch_factor))
 
-    train_loader = DataLoader(
+    train_loader = build_train_loader(
         train_ds,
         batch_size=batch_size,
-        shuffle=train_shuffle,
-        sampler=train_sampler,
-        drop_last=True,
-        **loader_kwargs,
+        num_workers=num_workers,
+        distributed=distributed,
+        dataset_subset_seed=dataset_subset_seed,
+        persistent_workers=persistent_workers,
+        prefetch_factor=prefetch_factor,
+        pin_memory=pin_memory,
     )
     val_loader = DataLoader(
         val_ds,
         batch_size=batch_size,
         shuffle=False,
+        sampler=val_sampler,
         **loader_kwargs,
     )
     return train_ds, val_ds, train_loader, val_loader, class_to_idx
@@ -481,6 +675,7 @@ def build_eval_loader(
     image_size: int,
     batch_size: int,
     num_workers: int,
+    distributed: bool = False,
     persistent_workers: bool = True,
     prefetch_factor: int = 4,
     pin_memory: bool = True,
@@ -499,10 +694,13 @@ def build_eval_loader(
         loader_kwargs["persistent_workers"] = persistent_workers
         loader_kwargs["prefetch_factor"] = max(2, int(prefetch_factor))
 
+    sampler = DistributedEvalSampler(dataset) if distributed else None
+
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=False,
+        sampler=sampler,
         **loader_kwargs,
     )
     return dataset, loader

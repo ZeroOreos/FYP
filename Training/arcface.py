@@ -29,6 +29,41 @@ class ArcFaceCeilingSpec:
     sub_center_count: int = 1
 
 
+@dataclass(frozen=True)
+class SharedClassSubset:
+    class_indices: torch.Tensor
+    remapped_labels: torch.Tensor
+
+
+def build_shared_class_subset(
+    labels: torch.Tensor,
+    *,
+    out_features: int,
+    sample_rate: float,
+) -> SharedClassSubset | None:
+    if sample_rate >= 1.0 or out_features <= 1:
+        return None
+    unique_labels = torch.unique(labels.detach()).to(torch.long)
+    all_indices = torch.arange(out_features, device=labels.device, dtype=torch.long)
+    negative_mask = torch.ones(out_features, device=labels.device, dtype=torch.bool)
+    negative_mask[unique_labels] = False
+    negative_indices = all_indices[negative_mask]
+
+    if negative_indices.numel() > 0:
+        negative_count = max(1, int(round(negative_indices.numel() * float(sample_rate))))
+        permutation = torch.randperm(negative_indices.numel(), device=labels.device)
+        sampled_negatives = negative_indices[permutation[:negative_count]]
+        sampled_indices = torch.cat([unique_labels, sampled_negatives], dim=0)
+    else:
+        sampled_indices = unique_labels
+
+    label_matches = sampled_indices.unsqueeze(0) == labels.unsqueeze(1)
+    if not torch.all(label_matches.any(dim=1)):
+        raise RuntimeError("Shared class subset failed to preserve all positive class centers.")
+    remapped_labels = label_matches.to(torch.long).argmax(dim=1)
+    return SharedClassSubset(class_indices=sampled_indices, remapped_labels=remapped_labels)
+
+
 class ArcFaceHead(nn.Module):
     """BN-Dropout-FC-BN head."""
 
@@ -149,6 +184,12 @@ class ArcMarginProduct(nn.Module):
         self.th = math.cos(math.pi - m)
         self.mm = math.sin(math.pi - m) * m
 
+    def _weight_rows_for_classes(self, class_indices: torch.Tensor) -> torch.Tensor:
+        if self.sub_center_count == 1:
+            return class_indices
+        offsets = torch.arange(self.sub_center_count, device=class_indices.device, dtype=torch.long)
+        return (class_indices.unsqueeze(1) * self.sub_center_count + offsets.unsqueeze(0)).reshape(-1)
+
     def _cosine_logits(
         self,
         embeddings: torch.Tensor,
@@ -184,6 +225,30 @@ class ArcMarginProduct(nn.Module):
 
     def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         return self._arc_logits(embeddings, self.weight, labels, self.out_features)
+
+    def training_outputs(
+        self,
+        embeddings: torch.Tensor,
+        labels: torch.Tensor,
+        class_subset: SharedClassSubset | None = None,
+    ) -> dict[str, torch.Tensor]:
+        if class_subset is None:
+            logits = self.forward(embeddings, labels)
+            loss_labels = labels
+        else:
+            sampled_weights = self.weight[self._weight_rows_for_classes(class_subset.class_indices)]
+            logits = self._arc_logits(
+                embeddings,
+                sampled_weights,
+                class_subset.remapped_labels,
+                class_subset.class_indices.numel(),
+            )
+            loss_labels = class_subset.remapped_labels
+        return {
+            "logits": logits,
+            "loss_labels": loss_labels,
+            "predict_logits": logits,
+        }
 
 
 class SubCenterArcMarginProduct(ArcMarginProduct):
@@ -227,15 +292,29 @@ class PartialFCArcMarginProduct(ArcMarginProduct):
         )
         self.negative_sample_rate = float(negative_sample_rate)
 
-    def _weight_rows_for_classes(self, class_indices: torch.Tensor) -> torch.Tensor:
-        if self.sub_center_count == 1:
-            return class_indices
-        offsets = torch.arange(self.sub_center_count, device=class_indices.device, dtype=torch.long)
-        return (class_indices.unsqueeze(1) * self.sub_center_count + offsets.unsqueeze(0)).reshape(-1)
-
-    def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    def _sampled_outputs(
+        self,
+        embeddings: torch.Tensor,
+        labels: torch.Tensor,
+        class_subset: SharedClassSubset | None = None,
+    ) -> dict[str, torch.Tensor]:
+        if class_subset is not None:
+            sampled_indices = class_subset.class_indices
+            remapped_labels = class_subset.remapped_labels
+            sampled_weights = self.weight[self._weight_rows_for_classes(sampled_indices)]
+            sampled_logits = self._arc_logits(embeddings, sampled_weights, remapped_labels, sampled_indices.numel())
+            return {
+                "logits": sampled_logits,
+                "loss_labels": remapped_labels,
+                "predict_logits": sampled_logits,
+            }
         if (not self.training) or self.negative_sample_rate >= 1.0 or self.out_features <= 1:
-            return super().forward(embeddings, labels)
+            logits = super().forward(embeddings, labels)
+            return {
+                "logits": logits,
+                "loss_labels": labels,
+                "predict_logits": logits,
+            }
 
         unique_labels = torch.unique(labels.detach()).to(torch.long)
         all_indices = torch.arange(self.out_features, device=labels.device, dtype=torch.long)
@@ -257,14 +336,22 @@ class PartialFCArcMarginProduct(ArcMarginProduct):
             raise RuntimeError("Partial FC failed to preserve all positive class centers in the sampled subset.")
         remapped_labels = label_matches.to(torch.long).argmax(dim=1)
         sampled_logits = self._arc_logits(embeddings, sampled_weights, remapped_labels, sampled_indices.numel())
-        full_logits = torch.full(
-            (embeddings.size(0), self.out_features),
-            fill_value=-1e9,
-            device=embeddings.device,
-            dtype=sampled_logits.dtype,
-        )
-        full_logits[:, sampled_indices] = sampled_logits
-        return full_logits
+        return {
+            "logits": sampled_logits,
+            "loss_labels": remapped_labels,
+            "predict_logits": sampled_logits,
+        }
+
+    def training_outputs(
+        self,
+        embeddings: torch.Tensor,
+        labels: torch.Tensor,
+        class_subset: SharedClassSubset | None = None,
+    ) -> dict[str, torch.Tensor]:
+        return self._sampled_outputs(embeddings, labels, class_subset=class_subset)
+
+    def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        return self.training_outputs(embeddings, labels)["logits"]
 
 
 class CosFaceMarginProduct(nn.Module):
@@ -292,6 +379,28 @@ class CosFaceMarginProduct(nn.Module):
     def inference_logits(self, embeddings: torch.Tensor) -> torch.Tensor:
         cosine = F.linear(F.normalize(embeddings), F.normalize(self.weight))
         return cosine * self.s
+
+    def training_outputs(
+        self,
+        embeddings: torch.Tensor,
+        labels: torch.Tensor,
+        class_subset: SharedClassSubset | None = None,
+    ) -> dict[str, torch.Tensor]:
+        if class_subset is None:
+            logits = self.forward(embeddings, labels)
+            loss_labels = labels
+        else:
+            sampled_weights = self.weight[class_subset.class_indices]
+            cosine = F.linear(F.normalize(embeddings), F.normalize(sampled_weights))
+            one_hot = torch.zeros_like(cosine)
+            one_hot.scatter_(1, class_subset.remapped_labels.view(-1, 1), 1.0)
+            logits = self.s * (cosine - one_hot * self.m)
+            loss_labels = class_subset.remapped_labels
+        return {
+            "logits": logits,
+            "loss_labels": loss_labels,
+            "predict_logits": logits,
+        }
 
 
 class CurricularFaceMarginProduct(nn.Module):
@@ -326,13 +435,53 @@ class CurricularFaceMarginProduct(nn.Module):
         hard_examples = cosine[hard_mask]
         with torch.no_grad():
             self.t = target_logit.mean() * 0.01 + (1.0 - 0.01) * self.t
-        cosine[hard_mask] = hard_examples * (self.t + hard_examples)
+        t_value = self.t.to(dtype=hard_examples.dtype, device=hard_examples.device)
+        cosine[hard_mask] = hard_examples * (t_value + hard_examples)
         cosine.scatter_(1, labels.view(-1, 1).long(), final_target)
         return cosine * self.s
 
     def inference_logits(self, embeddings: torch.Tensor) -> torch.Tensor:
         cosine = F.linear(F.normalize(embeddings), F.normalize(self.weight))
         return cosine.clamp(-1.0, 1.0) * self.s
+
+    def training_outputs(
+        self,
+        embeddings: torch.Tensor,
+        labels: torch.Tensor,
+        class_subset: SharedClassSubset | None = None,
+    ) -> dict[str, torch.Tensor]:
+        if class_subset is None:
+            logits = self.forward(embeddings, labels)
+            loss_labels = labels
+        else:
+            sampled_weights = self.weight[class_subset.class_indices]
+            cosine = F.linear(F.normalize(embeddings), F.normalize(sampled_weights))
+            cosine = cosine.clamp(-1.0, 1.0)
+            target_logit = cosine[
+                torch.arange(0, embeddings.size(0), device=embeddings.device),
+                class_subset.remapped_labels,
+            ].view(-1, 1)
+            sine = torch.sqrt(torch.clamp(1.0 - target_logit.pow(2), min=1e-9))
+            cosine_with_margin = target_logit * self.cos_m - sine * self.sin_m
+            hard_mask = cosine > cosine_with_margin
+            final_target = torch.where(target_logit > self.threshold, cosine_with_margin, target_logit - self.mm)
+            final_target = final_target.to(dtype=cosine.dtype, device=cosine.device)
+            hard_examples = cosine[hard_mask]
+            with torch.no_grad():
+                self.t = target_logit.mean() * 0.01 + (1.0 - 0.01) * self.t
+            t_value = self.t.to(dtype=hard_examples.dtype, device=hard_examples.device)
+            cosine[hard_mask] = hard_examples * (t_value + hard_examples)
+            cosine.scatter_(1, class_subset.remapped_labels.view(-1, 1).long(), final_target)
+            logits = cosine * self.s
+            loss_labels = class_subset.remapped_labels
+        if class_subset is None:
+            logits = self.forward(embeddings, labels)
+            loss_labels = labels
+        return {
+            "logits": logits,
+            "loss_labels": loss_labels,
+            "predict_logits": logits,
+        }
 
 
 class ArcFaceModel(nn.Module):

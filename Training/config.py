@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -47,17 +48,27 @@ class EnsembleTrainingConfig:
     train_dir: str
     val_dir: str
     output_dir: str
+    resume_from: str | None = None
     dataset_fraction: float = 1.0
     dataset_subset_seed: int = 42
     dataset_min_images_per_identity: int = 2
     target_model: str = "arcface"
+    recognizers_mode: str = "serial_target"
+    runtime_profile: str = "custom"
     target_backbone: str = "resnet18"
     surrogate_models: list[str] = field(default_factory=lambda: ["target"])
     attack_sampling_strategy: str = "weighted_random"
     batch_size: int = 32
+    clean_warmup_batch_size: int | None = None
+    shallow_adv_batch_size: int | None = None
+    full_adv_batch_size: int | None = None
+    attack_chunk_size: int | None = None
     gradient_accumulation_steps: int = 1
     epochs: int = 10
     learning_rate: float = 0.1
+    auto_scale_learning_rate: bool = False
+    reference_batch_size: int | None = None
+    lr_scale_mode: str = "linear"
     weight_decay: float = 5e-4
     embedding_dim: int = 256
     image_size: int = 112
@@ -87,9 +98,13 @@ class EnsembleTrainingConfig:
     use_gradient_checkpointing: bool = True
     use_distributed: bool = True
     distributed_backend: str = "nccl"
+    distributed_timeout_seconds: int = 7200
     use_sync_batchnorm: bool = True
+    ddp_no_sync_accumulation: bool = True
+    ddp_broadcast_buffers: bool = False
     ddp_gradient_as_bucket_view: bool = True
     ddp_static_graph: bool = False
+    ddp_bucket_cap_mb: int | None = None
     optimizer_name: str = "sgd"
     optimizer_foreach: bool | None = True
     optimizer_fused: bool | None = None
@@ -158,6 +173,11 @@ class EnsembleTrainingConfig:
     def resolved_output_dir(self) -> Path:
         return Path(self.output_dir).resolve()
 
+    def resolved_resume_from(self) -> Path | None:
+        if self.resume_from is None:
+            return None
+        return Path(self.resume_from).resolve()
+
     def resolved_test_dir(self) -> Path | None:
         if self.test_dir is None:
             return None
@@ -168,6 +188,15 @@ class EnsembleTrainingConfig:
             primary_attackers=list(self.primary_attackers),
             surrogate_attackers=list(self.surrogate_attackers),
         )
+
+    def normalized_recognizers_mode(self) -> str:
+        return self.recognizers_mode.strip().lower()
+
+    def uses_joint_train(self) -> bool:
+        return self.normalized_recognizers_mode() == "joint_train"
+
+    def normalized_runtime_profile(self) -> str:
+        return self.runtime_profile.strip().lower()
 
     def all_attackers(self) -> list[AttackPolicy]:
         return self.attack_ensemble().all_attackers()
@@ -329,6 +358,67 @@ def _split_legacy_attack_policies(policies: list[AttackPolicy]) -> tuple[list[At
     return primary, surrogate
 
 
+def _remap_dataset_path(raw_path: str, *, dataset_name: str, env_var: str) -> str:
+    env_root = os.environ.get(env_var)
+    if not env_root:
+        return raw_path
+    normalized = raw_path.replace("\\", "/")
+    marker = f"/Dataset/{dataset_name}/"
+    if marker not in normalized:
+        return os.path.expandvars(raw_path)
+    suffix = normalized.split(marker, 1)[1]
+    return str((Path(env_root).expanduser() / suffix).resolve())
+
+
+def _remap_pairs_path(raw_path: str) -> str:
+    normalized = raw_path.replace("\\", "/")
+    marker = "/Dataset/pairs/"
+    if marker not in normalized:
+        return raw_path
+
+    dataset_root = os.environ.get("FYP_WEBFACE4M_ROOT") or os.environ.get("FYP_WEBFACE42M_ROOT")
+    if not dataset_root:
+        return raw_path
+
+    pairs_root = Path(dataset_root).expanduser().resolve().parent / "pairs"
+    suffix = normalized.split(marker, 1)[1]
+    return str((pairs_root / suffix).resolve())
+
+
+def _remap_output_path(raw_path: str) -> str:
+    env_root = os.environ.get("FYP_OUTPUT_ROOT")
+    if not env_root:
+        return raw_path
+    normalized = raw_path.replace("\\", "/")
+    marker = "/TrainingRuns/"
+    if marker not in normalized:
+        return os.path.expandvars(raw_path)
+    suffix = normalized.split(marker, 1)[1]
+    return str((Path(env_root).expanduser() / suffix).resolve())
+
+
+def _portable_config_paths(config_data: dict) -> dict:
+    adjusted = dict(config_data)
+    for key in ("train_dir", "val_dir", "test_dir", "val_pairs_path", "test_pairs_path", "output_dir", "resume_from"):
+        value = adjusted.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        expanded = os.path.expandvars(value)
+        if key == "output_dir":
+            adjusted[key] = _remap_output_path(expanded)
+            continue
+        if key == "resume_from":
+            adjusted[key] = _remap_output_path(expanded)
+            continue
+        if key in {"val_pairs_path", "test_pairs_path"}:
+            adjusted[key] = _remap_pairs_path(expanded)
+            continue
+        remapped = _remap_dataset_path(expanded, dataset_name="WebFace4M", env_var="FYP_WEBFACE4M_ROOT")
+        remapped = _remap_dataset_path(remapped, dataset_name="WebFace42M", env_var="FYP_WEBFACE42M_ROOT")
+        adjusted[key] = remapped
+    return adjusted
+
+
 def config_from_dict(data: dict) -> EnsembleTrainingConfig:
     raw_primary = data.get("primary_attackers")
     raw_surrogate = data.get("surrogate_attackers")
@@ -343,7 +433,50 @@ def config_from_dict(data: dict) -> EnsembleTrainingConfig:
         "primary_attackers": primary_attackers,
         "surrogate_attackers": surrogate_attackers,
     }
+    config_data = _portable_config_paths(config_data)
     config_data.pop("attacks", None)
+    raw_mode = str(config_data.get("recognizers_mode", "")).strip().lower()
+    raw_target_model = str(config_data.get("target_model", "arcface")).strip().lower()
+    if not raw_mode:
+        config_data["recognizers_mode"] = "joint_train" if raw_target_model in {"joint_pool", "jointpool", "pool"} else "serial_target"
+    elif raw_mode in {"serial_target", "joint_train"}:
+        config_data["recognizers_mode"] = raw_mode
+    else:
+        raise ValueError(
+            f"Unsupported recognizers_mode '{config_data.get('recognizers_mode')}'. "
+            "Supported values are 'serial_target' and 'joint_train'."
+        )
+    if config_data["recognizers_mode"] == "serial_target" and raw_target_model in {"joint_pool", "jointpool", "pool"}:
+        raise ValueError(
+            "target_model='joint_pool' requires recognizers_mode='joint_train'. "
+            "Use a single target recognizer for the serial_target mainline."
+        )
+    raw_profile = str(config_data.get("runtime_profile", "")).strip().lower()
+    if not raw_profile:
+        config_data["runtime_profile"] = "custom"
+    elif raw_profile in {"custom", "benchmark", "paper_full"}:
+        config_data["runtime_profile"] = raw_profile
+    else:
+        raise ValueError(
+            f"Unsupported runtime_profile '{config_data.get('runtime_profile')}'. "
+            "Supported values are 'custom', 'benchmark', and 'paper_full'."
+        )
+    raw_lr_scale_mode = str(config_data.get("lr_scale_mode", "linear")).strip().lower()
+    if raw_lr_scale_mode in {"linear", "sqrt"}:
+        config_data["lr_scale_mode"] = raw_lr_scale_mode
+    else:
+        raise ValueError(
+            f"Unsupported lr_scale_mode '{config_data.get('lr_scale_mode')}'. "
+            "Supported values are 'linear' and 'sqrt'."
+        )
+    for key in ("primary_attackers", "surrogate_attackers"):
+        policies = config_data.get(key) or []
+        for policy in policies:
+            if isinstance(policy, dict):
+                policy.pop("bpfa_train_views", None)
+                policy.pop("bpfa_eval_views", None)
+                policy.pop("bpfa_view_forward_group_size", None)
+                policy.pop("bpfa_restart_score_mode", None)
     return EnsembleTrainingConfig(**config_data)
 
 

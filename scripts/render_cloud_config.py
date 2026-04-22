@@ -18,10 +18,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cached-attack-root", action="append", default=None)
     parser.add_argument("--enable-distributed", action="store_true")
     parser.add_argument("--disable-distributed", action="store_true")
+    parser.add_argument("--enable-sync-batchnorm", action="store_true")
+    parser.add_argument("--disable-sync-batchnorm", action="store_true")
+    parser.add_argument("--enable-torch-compile", action="store_true")
+    parser.add_argument("--disable-torch-compile", action="store_true")
     parser.add_argument("--num-workers", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--dataset-fraction", type=float, default=None)
+    parser.add_argument("--enable-gradient-checkpointing", action="store_true")
+    parser.add_argument("--disable-gradient-checkpointing", action="store_true")
     return parser.parse_args()
 
 
@@ -46,10 +53,24 @@ def main() -> None:
 
     if args.enable_distributed and args.disable_distributed:
         raise SystemExit("Choose only one of --enable-distributed or --disable-distributed.")
+    if args.enable_sync_batchnorm and args.disable_sync_batchnorm:
+        raise SystemExit("Choose only one of --enable-sync-batchnorm or --disable-sync-batchnorm.")
+    if args.enable_torch_compile and args.disable_torch_compile:
+        raise SystemExit("Choose only one of --enable-torch-compile or --disable-torch-compile.")
+    if args.enable_gradient_checkpointing and args.disable_gradient_checkpointing:
+        raise SystemExit("Choose only one of --enable-gradient-checkpointing or --disable-gradient-checkpointing.")
     if args.enable_distributed:
         payload["use_distributed"] = True
     if args.disable_distributed:
         payload["use_distributed"] = False
+    if args.enable_sync_batchnorm:
+        payload["use_sync_batchnorm"] = True
+    if args.disable_sync_batchnorm:
+        payload["use_sync_batchnorm"] = False
+    if args.enable_torch_compile:
+        payload["use_torch_compile"] = True
+    if args.disable_torch_compile:
+        payload["use_torch_compile"] = False
     if args.num_workers is not None:
         payload["num_workers"] = int(args.num_workers)
     if args.batch_size is not None:
@@ -58,6 +79,12 @@ def main() -> None:
         payload["gradient_accumulation_steps"] = max(1, int(args.gradient_accumulation_steps))
     if args.epochs is not None:
         payload["epochs"] = int(args.epochs)
+    if args.dataset_fraction is not None:
+        payload["dataset_fraction"] = float(args.dataset_fraction)
+    if args.enable_gradient_checkpointing:
+        payload["use_gradient_checkpointing"] = True
+    if args.disable_gradient_checkpointing:
+        payload["use_gradient_checkpointing"] = False
     if args.cached_attack_root:
         roots = [str(Path(item).resolve()) for item in args.cached_attack_root]
         for policy in payload.get("surrogate_attackers", []):
