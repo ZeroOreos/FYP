@@ -1,6 +1,6 @@
 # FYP
 
-Face recognition robustness research focused on adversarial-plus-recognizer ensemble training for robust face embeddings.
+Face recognition robustness research focused on multi-recognizer plus multi-attacker training for robust face embeddings.
 
 ## Entry Point
 
@@ -10,8 +10,8 @@ This repo is now training-first. The old recognition-only and attack-materializa
 
 ## Current Scope
 
-- recognizer side of the ensemble: `ArcFace`, `CosFace`, `CurricularFace`
-- current trainable target paths in code: `ArcFace`, `CosFace`, `CurricularFace` placeholders over `ResNet18`
+- recognizer ensemble families for the paper path: `ArcFace`, `CosFace`, `CurricularFace`
+- current trainable target paths in code: single-target `ArcFace` / `CosFace` / `CurricularFace`, plus the legacy composite `joint_pool` target path
 - primary attacker set for the research plan: `PGD`, `BPFA`, `DFANet`
 - surrogate attacker set for the research plan: `AdvFaceGAN`, `Adv-Makeup`, `Greedy-DiM`
 - currently wired native primary attacks in code: `pgd`, `bpfa`, `dfanet`
@@ -69,7 +69,13 @@ Surrogate wrappers:
 - `Modifiers/attack/adv_makeup/`
 - `Modifiers/attack/dim/`
 
-For research framing, do not confuse the recognizer side of the ensemble with the attacker side. The recognizer ensemble is `ArcFace`, `CosFace`, and `CurricularFace`. The attacker ensemble is organized separately into a primary attacker set and a surrogate attacker set.
+For research framing, do not confuse the target model, the recognizer ensemble, and the attacker ensemble.
+
+- target model: the single defended model being optimized
+- recognizer ensemble: auxiliary recognizer heads or models that provide additional training pressure
+- attacker ensemble: rotating attack policies split into primary attackers and surrogate attackers
+
+`joint_pool` remains available as a composite target architecture, but it is not the same thing as the external recognizer-ensemble path used for the paper design.
 
 ## Quick Start
 
@@ -87,16 +93,16 @@ python3 main_train_ensemble.py \
   --config Training/smoke_ensemble_config.json
 ```
 
-Render the canonical paper ladder plus the short phase-3 integration config:
+Render the canonical paper ladder plus the short integration config:
 
 ```bash
 python3 scripts/render_paper_ladder_configs.py \
   --dataset-fraction 1.0 \
-  --batch-size 32 \
+  --batch-size 64 \
   --num-workers 16
 ```
 
-This writes the five full paper runs plus the short `joint-test` config against the full `WebFace4M` manifests.
+This writes the five full paper runs plus the short `joint_test` config against the full `WebFace4M` manifests. The rendered ladder currently uses `128 / 48 / 32` phase batch sizes with `attack_chunk_size=32`.
 
 ## Shell Server Workflow
 

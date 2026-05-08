@@ -7,13 +7,115 @@ Current repo state
 - Files under `notes/reports/` are non-repo-impacting report artifacts and writeups.
 - Reports must be treated as downstream descriptions of the repo state, not as the source of truth for repo decisions.
 - If a report conflicts with code, configs, run artifacts, or core notes, trust the repo implementation and repair the report instead of steering the repo toward the report.
-- The current trainable target is `ArcFace` on `ResNet18` as the current real verification-stage backbone.
+- The current main trainable target for the paper path is `ArcFace` on `iResNet100`.
 - The intended defended recognizer ensemble for the paper is `ArcFace`, `CosFace`, and `CurricularFace`.
 - The intended attacker ensemble for the paper is split into primary attackers and surrogate attackers.
 - `CosFace` and `CurricularFace` now complete real WebFace4M subset non-smoke attacked runs alongside `ArcFace` in the same local training API.
 - Native `CosFace` and `CurricularFace` sources are now pulled into `Backends`.
 - The tuned path should now be framed as recognizer training under a two-sided ensemble: recognizer ensemble plus attacker ensemble.
 - `WebFace4M` is now the only active training and verification data path in the repo.
+
+Paper-strength implementation status
+- The main paper ladder is now pressure-based rather than the older `joint_pool` naming.
+- The current ladder conditions are:
+- `baseline-clean`
+- `recognizer-ensemble-only`
+- `single-attack-only`
+- `attack-ensemble-only`
+- `full-ensemble`
+- `full-ensemble-test`
+- The main paper condition is `full-ensemble`, not `full-ensemble-test`.
+- `full-ensemble` currently means:
+- one explicit target model: `ArcFace` on `iResNet100`
+- one explicit external recognizer ensemble: `ArcFace`, `CosFace`, `CurricularFace`
+- one explicit attacker ensemble: `PGD`, `BPFA`, `DFANet`
+- the recognizer ensemble and attacker ensemble both apply pressure to the same target model
+- the paper-claim wording should treat this as `target model + multi-recognizer ensemble + multi-attacker ensemble`, not as the older composite-target `joint_pool` wording
+- The successful verification-stage test condition that should be treated as the current trusted contract is `full-ensemble-test` with:
+- `target_backbone = iresnet100`
+- `batch_size = 64`
+- `clean_warmup_batch_size = 128`
+- `shallow_adv_batch_size = 48`
+- `full_adv_batch_size = 32`
+- `attack_chunk_size = 32`
+- `clean_warmup_epochs = 2`
+- `shallow_adv_epochs = 1`
+- `epochs = 4`
+- recognizer ensemble enabled
+- attacker ensemble enabled
+- eval cadence: clean every epoch, verification every non-robust epoch, robust PGD every `4` epochs, full all-attacker robust sweep every `8` epochs plus final
+- The main paper run `full-ensemble` currently uses:
+- `target_backbone = iresnet100`
+- `batch_size = 64`
+- `clean_warmup_batch_size = 128`
+- `shallow_adv_batch_size = 48`
+- `full_adv_batch_size = 32`
+- `attack_chunk_size = 32`
+- `clean_warmup_epochs = 3`
+- `shallow_adv_epochs = 9`
+- `epochs = 24`
+- The shallow-vs-full story should be described as a strength curriculum over the same attack families, not as two unrelated attack regimes:
+- shallow stage uses `PGD`, `BPFA`, and `DFANet`
+- shallow stage uses reduced budgets and restart depth
+- full stage uses the same families at stronger settings and for longer duration
+- This gives a stronger paper justification than a shallow stage that uses only `PGD`.
+- The current implementation is strong enough to support the architecture claim:
+- one target model
+- one multi-recognizer ensemble
+- one multi-attacker ensemble
+- joint pressure onto the target model
+- The current implementation is not, by itself, enough to support an effectiveness claim until the full ladder results are complete.
+- Verification reporting is implemented for the paper path and should be treated as part of the paper-strength metric surface:
+- `accuracy`
+- `eer`
+- `roc_auc`
+- `tar@far=0.0001`
+- `tar@far=1e-05`
+- mean positive and negative cosine
+- Verification evaluation is now batched rather than fully serial:
+- unique images are deduplicated first
+- image loading is parallelized through a dataloader
+- extracted filesystem image paths are preferred over `shard::member` references whenever available
+- verification images are resized on the CPU side before transfer so the GPU sees smaller fixed-size tensors
+- embedding extraction is batched on the GPU
+- pair scoring is vectorized in chunks instead of one pair at a time
+- verification metrics use an exact sorted-score/cumulative TP-FP implementation rather than approximate threshold grids
+- the verification probe prints progress for embedding extraction, distributed gather, pair scoring, and metric computation
+- This keeps the metric definition unchanged while making verification much more practical for the main paper path.
+- Use `scripts/probe_verification.py` to isolate verification throughput from the training loop before blaming the main training config.
+- The probe reports pair count, unique-reference count, shard-vs-image reference mode, wall time, pairs/s, unique refs/s, and the resulting verification metrics.
+- Final robust evaluation is now also backfilled automatically when a run has eval-only attackers but no training attackers, so clean-only and recognizer-only rows can remain non-adversarial during training while still receiving a final `PGD/BPFA/DFANet` robustness row.
+- Paper ladder configs therefore distinguish `primary_attackers` used for training from `eval_attackers` used for fair final robustness evaluation.
+- Safe paper wording:
+- “We train a target face recognizer under supervision from a multi-recognizer ensemble and adversarial pressure from a multi-attacker ensemble.”
+- Avoid overstating:
+- do not describe the recognizer ensemble as frozen pretrained teachers unless that is literally what the implementation does
+- do not describe the path as a deployed inference-time ensemble unless the paper explicitly evaluates that deployment mode
+- do not claim superiority before the full ablation ladder completes
+
+Paper-alignment and runtime decision notes
+- The paper claim should be framed as a defended target recognizer trained under a multi-recognizer objective ensemble and a multi-attacker adversarial ensemble.
+- This is stronger and more accurate than saying the current main path is a deployment-time ensemble of independent recognizer backbones.
+- The current recognizer ensemble is `ArcFace`, `CosFace`, and `CurricularFace` margin-head pressure over the target embedding.
+- For the strongest literal multi-recognizer wording, add held-out external recognizer-backbone evaluation or a frozen external recognizer teacher path before final submission.
+- The current attacker ensemble is aligned with robust-optimization and ensemble-adversarial-training precedent: use strong iterative white-box pressure, transfer/black-box pressure, and diverse evaluation attacks.
+- The evaluation story must stay non-overlapping with training pressure:
+- report trained attacks separately from held-out or stronger attacks
+- report per-attack metrics and aggregate robustness
+- report per-recognizer metrics, recognizer-ensemble gain vs best single, and calibration
+- report verification metrics: EER, ROC-AUC, TAR@FAR, best threshold, and mean positive/negative cosine
+- report efficiency metrics: global image/s, attack-generation share, step share, GPU peak memory, and attacker policy fractions
+- use `scripts/evaluate_paper_breakdown.py` after checkpoints are available to produce the paper-facing clean/trained-attack/stress-attack breakdown across the target and recognizer heads
+- write that breakdown as `paper_breakdown.json`, `paper_breakdown.csv`, and `paper_breakdown.md` inside the run directory for export
+- The old wrong `full-ensemble` history is still useful for runtime diagnosis:
+- clean warmup at batch `128` was loader-light and GPU-heavy enough
+- recognizer pressure is now stage-gated with `recognizer_start_epoch` so clean warmup can remain target-only and fast before the multi-recognizer objective turns on
+- target Partial FC remains at `0.3`, while auxiliary recognizer heads use `recognizer_partial_fc_negative_sample_rate = 0.12` to avoid OOM from four simultaneous many-class margin heads
+- shallow adversarial batch `48` was stable around `380ms` attack generation and roughly `600` global img/s on non-heavy-eval epochs
+- full adversarial batch `32` was faster and safer than `40` in the old evidence
+- full adversarial batch `40` increased attack-generation time and memory pressure enough to reduce throughput and trigger OOM risk
+- The source paper configs therefore pin full adversarial batch size to `32` for paper safety unless a new probe proves a higher value improves throughput without OOM.
+- Do not weaken the full attack objective just to go faster; any FGSM/free-style shortcut should be an explicit speed ablation, not the main result.
 
 What exists now
 - clean and attacked ensemble training loop
@@ -36,7 +138,8 @@ What exists now
 What is standard versus what is specialized here
 - Standard ingredients we are reusing rather than claiming as new: margin-loss face-recognition families (`ArcFace`, `CosFace`, `CurricularFace`), `SGD`, `Partial FC`, optional sub-center `ArcFace`, distributed PyTorch / `DDP`, `SyncBatchNorm`, gradient accumulation, mixed precision, clean evaluation, white-box adversarial training, and the current native primary attackers `PGD`, `BPFA`, and `DFANet`.
 - Standard data-engineering direction: manifest-backed training on aligned `WebFace4M`, optional server-side JPEG extraction behind the same manifest contract, and ordinary checkpoint / history / metrics artifact writing.
-- Specialized repo behavior: the defended recognizer target can be a jointly trained `joint_pool` over `ArcFace + CosFace + CurricularFace` instead of only a single recognizer.
+- Specialized repo behavior: the repo now supports both a legacy composite-target `joint_pool` path and a newer explicit target-plus-recognizer-ensemble path.
+- Specialized repo behavior: `joint_pool` means one composite defended target with internal `ArcFace + CosFace + CurricularFace` heads, not the same thing as an external recognizer ensemble.
 - Specialized repo behavior: the training contract uses an explicit `three_stage` depth schedule with clean warmup, shallow adversarial depth, and full adversarial depth instead of one fixed attack depth from epoch `1`.
 - Specialized repo behavior: primary attacker families are rotated by batch through an attack-policy sampler instead of blended uniformly into every batch.
 - Specialized repo behavior: ensemble-aware hard-pair mining is part of the defended update rule and is staged over training rather than kept fixed from the start.
@@ -45,10 +148,11 @@ What is standard versus what is specialized here
 - Specialized repo behavior: run reporting is tuned for this repo, including structured epoch records in `metrics.jsonl`, explicit validation-loss fields in epoch summaries, and DDP-aware global progress display instead of rank-local progress percentages.
 
 What research says to do next
-- frame the system as adversarial recognizer training with a defended recognizer pool and an attack pool
+- frame the system as adversarial recognizer training with one defended target model, an external recognizer ensemble, and an explicit attacker ensemble
 - keep the defended recognizer set compact and paper-legible instead of expanding into too many side families
 - use the foundational margin-loss recognizers that make the comparison logic easy to justify in the paper
-- train the defended recognizer pool jointly and keep the attacker side diverse and explicit
+- keep `joint_pool` available as a legacy or ablation composite-target path, not as the only interpretation of recognizer ensembling
+- train the main paper path as one target under recognizer-ensemble pressure and attacker-ensemble pressure
 - keep the attack side ensemble-aware with explicit primary attackers and explicit surrogate attackers
 - keep the main recognizer ensemble as `ArcFace`, `CosFace`, and `CurricularFace`
 - define the primary attacker set as `PGD`, `BPFA`, and `DFANet`
@@ -67,6 +171,41 @@ What research says to do next
 - use a default `50%` clean / `50%` adversarial batch split
 - use a default adversarial intent split of `50%` impersonation / `50%` dodging
 - keep morphing, makeup, and generative attacks as periodic-training or eval-time pressure, not the default every-batch path
+- phrase the main claim as a moderately strong multi-recognizer, multi-attack ensemble claim, not as a claim that this repo has discovered the final FR robustness standard
+- expect the largest gains from the broader ensemble conditions to appear in robust loss, robust accuracy, attack success rate, and transfer behavior, while clean-only baselines may still look best on clean accuracy
+
+Completed paper ladder readout
+- The completed local paper ladder now has five primary rows: `baseline-clean`, `recognizer-ensemble-only`, `single-attack-only`, `attack-ensemble-only`, and `full-ensemble`.
+- Final clean validation: `baseline-clean` `99.23%`, `recognizer-ensemble-only` `99.23%`, `attack-ensemble-only` `93.98%`, `full-ensemble` `93.40%`, and `single-attack-only` `79.69%`.
+- Final robust validation is available for the attacked rows: `single-attack-only` `30.00%` under its trained `PGD` eval, `attack-ensemble-only` `52.32%` averaged over `PGD/BPFA/DFANet`, and `full-ensemble` `56.55%` averaged over `PGD/BPFA/DFANet`.
+- Comparability caveat: rerun `single-attack-only` posthoc robust with the shared `PGD/BPFA/DFANet` eval suite before using it in an averaged robustness table.
+- Final attack success rate is lower for `full-ensemble` than `attack-ensemble-only`: `39.45%` versus `44.32%`.
+- Final per-attack robust accuracy favors `full-ensemble` over `attack-ensemble-only` on every in-loop family: `PGD` `52.55%` versus `45.45%`, `BPFA` `69.56%` versus `66.09%`, and `DFANet` `47.55%` versus `45.43%`.
+- `single-attack-only` is a useful narrow-training contrast: despite training on `PGD`, its final `PGD` robust accuracy is only `30.00%`, far below the broader attack-ensemble and full-ensemble rows.
+- Final posthoc verification is strongest for clean/recognizer-only rows: `baseline-clean` pair accuracy `99.96%`, `EER=0.047%`; `recognizer-ensemble-only` pair accuracy `99.96%`, `EER=0.041%`.
+- Final posthoc verification for `attack-ensemble-only` remains strong: pair accuracy `98.33%`, `EER=1.78%`, `ROC-AUC=99.75%`.
+- Final posthoc verification for `single-attack-only` is poor relative to the other rows: pair accuracy `89.74%`, `EER=12.82%`, `ROC-AUC=92.01%`.
+- Final `full-ensemble` posthoc verification is now pulled locally: pair accuracy `98.21%`, `EER=1.93%`, `ROC-AUC=99.73%`.
+- Local artifact caveat: the currently pulled `baseline-clean/posthoc-robust.json` and `recognizer-ensemble-only/posthoc-robust.json` are skipped artifacts with `reason=no_attackers`; rerun those posthoc robust probes after syncing the `eval_attackers` patch before comparing clean-only or recognizer-only robustness against attacked rows.
+- Local artifact caveat: `single-attack-only` also needs a shared-suite posthoc robust probe because the fair paper comparison should evaluate every row against the same `PGD/BPFA/DFANet` suite.
+- Crosscheck caveat: older `summary.json.best.val_verification_eer` and `summary.json.best.val_robust_attack_success_rate` fields were produced by a generic max-is-best helper, so paper tables should use final/latest/posthoc EER and attack-success values instead of those legacy `best` fields.
+- Paper interpretation: the clean and recognizer-only rows show the high clean/verification ceiling; broader adversarial training lowers clean/verification performance but greatly improves robust validation; adding recognizer-ensemble pressure on top of attack-ensemble training gives the best final robust result among completed robust rows.
+- Paper caution: do not claim that multi-recognizer pressure improves clean accuracy or verification accuracy; the current evidence says its main benefit is adversarial robustness and lower attack success relative to attacker-only training.
+- Paper caution: for already completed clean-only and recognizer-only artifacts, do not compare them against attacked rows on robust metrics until non-skipped `posthoc-robust.json` files have been generated and pulled; future runs now backfill this final robustness row automatically.
+
+Next-step paper positioning: modern attacker stress testing
+- The current paper should not claim broad robustness against all modern face-recognition attacks.
+- The completed core should be framed as supervised multi-recognizer, multi-attacker adversarial training evaluated against its explicit in-loop attack families and ablation ladder.
+- A strong and honest next step is a posthoc stress-test suite against more modern or more semantically realistic attackers.
+- This next step should be described as future validation or follow-up work, not as evidence already established by the current completed ladder.
+- The most defensible next-step lineup is:
+- stronger online white-box attacks such as higher-budget `PGD`, margin/CW-style attacks, and parameter-free robustness checks such as AutoAttack/APGD
+- stronger transfer-oriented face attacks such as TransMix-style transfer attacks
+- semantic or generative face attacks such as adversarial makeup and diffusion-based face privacy attacks
+- morphing attacks such as Greedy-DiM evaluated with a verification/morph protocol rather than only closed-set classification
+- physical or cross-system realism extensions such as patch/makeup attacks and FR-plus-FAS/PAD stacks
+- The paper can say these stress tests are the natural next step because the current innovation is in the training framework and ablation evidence, while modern generative and physical attackers require separate faithful attack implementations or cached generated adversarial images.
+- Do not fake modern attack coverage by renaming existing `PGD`, `BPFA`, or `DFANet` runs; only count a modern attack if its actual method or generated adversarial images are used.
 
 What this implementation is
 - the working final training repo
@@ -78,6 +217,7 @@ What this implementation is
 - now has an `MPS`-targeted serious `WebFace4M` `ArcFace` `ResNet18` config ready for the full local shard set
 - now has one completed low-epoch shard-backed `WebFace4M` subset run on `MPS`
 - the active forward path should now migrate fully to `WebFace4M` for both testing and training
+- the active serious backbone path is now `iResNet100`; smaller-backbone verification should be treated as historical scaffolding unless explicitly reintroduced for a bounded smoke or debug purpose
 
 What this implementation is not
 - not yet the final serious `ArcFace` `iResNet100` implementation end to end
@@ -86,6 +226,7 @@ What this implementation is not
 - not yet aligned with the final selected paper backbone and final attacker design
 - not proof that the main claim is true
 - not yet evidence that the current joint defended-pool implementation is the right final standard for FR
+- not a promise that every broader ensemble condition will dominate every baseline on every metric
 
 Known hard limits
 - the final `WebFace4M` or `WF42M` run on the chosen final backbone is still larger-scale work
@@ -117,7 +258,7 @@ Current tuned recipe under that budget
 - final serious `ArcFace` target: `iResNet100`
 - current verification-stage backbone path: `ResNet18`
 - optimizer: `SGD`
-- train the defended recognizer pool jointly under rotating attacker pressure
+- train one defended target under explicit recognizer-ensemble pressure plus rotating attacker pressure on the main paper path
 - treat a `WebFace4M` slice as medium-scale adversarial fine-tuning, not full from-scratch large-scale pretraining
 - first serious schedule: `24` epochs
 - use `2` epoch LR warmup
@@ -166,6 +307,7 @@ Recent implementation notes
 - terminal logging was intentionally trimmed so batch-window reports still go to `train.log` on the configured interval, but they are no longer all echoed to the interactive terminal
 - epoch summaries now print validation-loss fields alongside the existing accuracy fields because validation loss is currently a more informative signal than the composite training loss alone
 - the training progress display was corrected to use global DDP sample counts rather than rank-`0` local counts, so low percentage-used readouts in distributed runs should now be treated as a resolved display bug rather than a data-coverage problem
+- the terminal display now highlights a cleaner training-loss breakdown, validation loss and accuracy, attack-generation timing, and peak memory so ongoing run health can be judged from quality, integrity, and speed signals together
 
 Do not pretend
 - the placeholder backbone is the paper result

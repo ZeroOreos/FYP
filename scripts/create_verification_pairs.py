@@ -22,11 +22,37 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--negative-pairs-per-id", type=int, default=4)
     parser.add_argument("--folds", type=int, default=5)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--prefer-image-paths",
+        dest="prefer_image_paths",
+        action="store_true",
+        help="When reading a manifest, prefer extracted image paths over shard::member references when available.",
+    )
+    parser.add_argument(
+        "--prefer-shard-refs",
+        dest="prefer_image_paths",
+        action="store_false",
+        help="When reading a manifest, keep shard::member references even if extracted image paths exist.",
+    )
+    parser.set_defaults(prefer_image_paths=True)
+    parser.add_argument(
+        "--image-root",
+        type=Path,
+        default=None,
+        help="Optional extracted-image root used to resolve rel_path entries when image_path is missing.",
+    )
     return parser.parse_args()
 
 
-def _manifest_identity_samples(manifest_path: Path) -> dict[str, list[str]]:
+def _manifest_identity_samples(
+    manifest_path: Path,
+    *,
+    prefer_image_paths: bool = True,
+    image_root: Path | None = None,
+) -> tuple[dict[str, list[str]], str]:
     mapping: dict[str, list[str]] = {}
+    reference_mode = "shard"
+    inferred_image_root = image_root.resolve() if image_root is not None else (manifest_path.resolve().parent.parent / "images")
     with manifest_path.open("r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
@@ -35,11 +61,21 @@ def _manifest_identity_samples(manifest_path: Path) -> dict[str, list[str]]:
             item = json.loads(line)
             label_name = str(item["label_name"])
             sample_ref = f"{Path(item['shard_path']).resolve()}::{item['key']}.jpg"
+            if prefer_image_paths:
+                image_path_value = item.get("image_path")
+                candidate_path: Path | None = None
+                if image_path_value is not None:
+                    candidate_path = Path(str(image_path_value)).expanduser().resolve()
+                elif item.get("rel_path") is not None and inferred_image_root.exists():
+                    candidate_path = (inferred_image_root / str(item["rel_path"])).resolve()
+                if candidate_path is not None and candidate_path.is_file():
+                    sample_ref = str(candidate_path)
+                    reference_mode = "image_path"
             mapping.setdefault(label_name, []).append(sample_ref)
     mapping = {identity: sorted(samples) for identity, samples in mapping.items() if len(samples) >= 2}
     if not mapping:
         raise RuntimeError(f"No usable manifest identities found in {manifest_path}")
-    return mapping
+    return mapping, reference_mode
 
 
 def _identity_images(dataset_dir: Path) -> dict[str, list[Path]]:
@@ -75,8 +111,13 @@ def main() -> None:
     metadata_json = (args.metadata_json or output_npz.with_suffix(".json")).resolve()
 
     rng = random.Random(args.seed)
+    reference_mode = "directory"
     if dataset_dir.is_file() and dataset_dir.suffix.lower() == ".jsonl":
-        mapping = _manifest_identity_samples(dataset_dir)
+        mapping, reference_mode = _manifest_identity_samples(
+            dataset_dir,
+            prefer_image_paths=bool(args.prefer_image_paths),
+            image_root=args.image_root,
+        )
     else:
         mapping = _identity_images(dataset_dir)
     identities = sorted(mapping)
@@ -130,6 +171,9 @@ def main() -> None:
         "folds": args.folds,
         "positive_pairs_per_id": args.positive_pairs_per_id,
         "negative_pairs_per_id": args.negative_pairs_per_id,
+        "reference_mode": reference_mode,
+        "prefer_image_paths": bool(args.prefer_image_paths),
+        "image_root": str(args.image_root.resolve()) if args.image_root is not None else None,
     }
     metadata_json.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     print(f"[INFO] Wrote pairs: {output_npz}")

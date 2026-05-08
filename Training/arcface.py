@@ -10,6 +10,10 @@ from torch.utils.checkpoint import checkpoint
 from torchvision import models
 
 
+def _normalized_linear(input: torch.Tensor, weight: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
+    return F.linear(F.normalize(input, dim=1, eps=eps), F.normalize(weight, dim=1, eps=eps))
+
+
 @dataclass(frozen=True)
 class ArcFaceCeilingSpec:
     detector_name: str = "RetinaFace-class"
@@ -196,7 +200,7 @@ class ArcMarginProduct(nn.Module):
         weights: torch.Tensor,
         class_count: int,
     ) -> torch.Tensor:
-        cosine = F.linear(F.normalize(embeddings), F.normalize(weights))
+        cosine = _normalized_linear(embeddings, weights)
         if self.sub_center_count > 1:
             cosine = cosine.view(embeddings.size(0), class_count, self.sub_center_count).max(dim=2).values
         return cosine
@@ -371,13 +375,13 @@ class CosFaceMarginProduct(nn.Module):
         nn.init.xavier_uniform_(self.weight)
 
     def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-        cosine = F.linear(F.normalize(embeddings), F.normalize(self.weight))
+        cosine = _normalized_linear(embeddings, self.weight)
         one_hot = torch.zeros_like(cosine)
         one_hot.scatter_(1, labels.view(-1, 1), 1.0)
         return self.s * (cosine - one_hot * self.m)
 
     def inference_logits(self, embeddings: torch.Tensor) -> torch.Tensor:
-        cosine = F.linear(F.normalize(embeddings), F.normalize(self.weight))
+        cosine = _normalized_linear(embeddings, self.weight)
         return cosine * self.s
 
     def training_outputs(
@@ -391,7 +395,7 @@ class CosFaceMarginProduct(nn.Module):
             loss_labels = labels
         else:
             sampled_weights = self.weight[class_subset.class_indices]
-            cosine = F.linear(F.normalize(embeddings), F.normalize(sampled_weights))
+            cosine = _normalized_linear(embeddings, sampled_weights)
             one_hot = torch.zeros_like(cosine)
             one_hot.scatter_(1, class_subset.remapped_labels.view(-1, 1), 1.0)
             logits = self.s * (cosine - one_hot * self.m)
@@ -425,7 +429,7 @@ class CurricularFaceMarginProduct(nn.Module):
         nn.init.normal_(self.weight, std=0.01)
 
     def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-        cosine = F.linear(F.normalize(embeddings), F.normalize(self.weight))
+        cosine = _normalized_linear(embeddings, self.weight)
         cosine = cosine.clamp(-1.0, 1.0)
         target_logit = cosine[torch.arange(0, embeddings.size(0), device=embeddings.device), labels].view(-1, 1)
         sine = torch.sqrt(torch.clamp(1.0 - target_logit.pow(2), min=1e-9))
@@ -441,7 +445,7 @@ class CurricularFaceMarginProduct(nn.Module):
         return cosine * self.s
 
     def inference_logits(self, embeddings: torch.Tensor) -> torch.Tensor:
-        cosine = F.linear(F.normalize(embeddings), F.normalize(self.weight))
+        cosine = _normalized_linear(embeddings, self.weight)
         return cosine.clamp(-1.0, 1.0) * self.s
 
     def training_outputs(
@@ -455,7 +459,7 @@ class CurricularFaceMarginProduct(nn.Module):
             loss_labels = labels
         else:
             sampled_weights = self.weight[class_subset.class_indices]
-            cosine = F.linear(F.normalize(embeddings), F.normalize(sampled_weights))
+            cosine = _normalized_linear(embeddings, sampled_weights)
             cosine = cosine.clamp(-1.0, 1.0)
             target_logit = cosine[
                 torch.arange(0, embeddings.size(0), device=embeddings.device),

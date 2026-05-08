@@ -44,6 +44,24 @@ class AttackEnsemble:
 
 
 @dataclass
+class RecognizerPolicy:
+    name: str
+    weight: float = 1.0
+    enabled: bool = True
+
+
+@dataclass
+class RecognizerEnsemble:
+    recognizers: list[RecognizerPolicy] = field(default_factory=list)
+
+    def all_recognizers(self) -> list[RecognizerPolicy]:
+        return list(self.recognizers)
+
+    def enabled_recognizers(self) -> list[RecognizerPolicy]:
+        return [policy for policy in self.recognizers if policy.enabled and policy.weight > 0]
+
+
+@dataclass
 class EnsembleTrainingConfig:
     train_dir: str
     val_dir: str
@@ -57,6 +75,11 @@ class EnsembleTrainingConfig:
     runtime_profile: str = "custom"
     target_backbone: str = "resnet18"
     surrogate_models: list[str] = field(default_factory=lambda: ["target"])
+    recognizer_ensemble: list[RecognizerPolicy] = field(default_factory=list)
+    recognizer_clean_weight: float = 0.0
+    recognizer_adv_weight: float = 0.0
+    recognizer_start_epoch: int = 1
+    recognizer_weight_strategy: str = "static"
     attack_sampling_strategy: str = "weighted_random"
     batch_size: int = 32
     clean_warmup_batch_size: int | None = None
@@ -92,6 +115,7 @@ class EnsembleTrainingConfig:
     robust_eval_every_epochs: int = 1
     full_robust_eval_every_epochs: int = 1
     verification_eval_every_epochs: int = 1
+    verification_eval_offset: int = 0
     clean_only: bool = False
     use_mixed_precision: bool = True
     mixed_precision_dtype: str = "auto"
@@ -115,6 +139,7 @@ class EnsembleTrainingConfig:
     arcface_margin: float = 0.5
     use_partial_fc: bool = True
     partial_fc_negative_sample_rate: float = 0.3
+    recognizer_partial_fc_negative_sample_rate: float | None = None
     sub_center_count: int = 1
     dropout_p: float = 0.4
     alignment_detector: str = "RetinaFace-class"
@@ -163,6 +188,7 @@ class EnsembleTrainingConfig:
     torch_compile_mode: str = "max-autotune-no-cudagraphs"
     primary_attackers: list[AttackPolicy] = field(default_factory=list)
     surrogate_attackers: list[AttackPolicy] = field(default_factory=list)
+    eval_attackers: list[AttackPolicy] = field(default_factory=list)
 
     def resolved_train_dir(self) -> Path:
         return Path(self.train_dir).resolve()
@@ -176,7 +202,10 @@ class EnsembleTrainingConfig:
     def resolved_resume_from(self) -> Path | None:
         if self.resume_from is None:
             return None
-        return Path(self.resume_from).resolve()
+        raw_resume = str(self.resume_from).strip()
+        if raw_resume.lower() in {"", "none", "null"}:
+            return None
+        return Path(raw_resume).resolve()
 
     def resolved_test_dir(self) -> Path | None:
         if self.test_dir is None:
@@ -188,6 +217,9 @@ class EnsembleTrainingConfig:
             primary_attackers=list(self.primary_attackers),
             surrogate_attackers=list(self.surrogate_attackers),
         )
+
+    def recognizer_ensemble_config(self) -> RecognizerEnsemble:
+        return RecognizerEnsemble(recognizers=list(self.recognizer_ensemble))
 
     def normalized_recognizers_mode(self) -> str:
         return self.recognizers_mode.strip().lower()
@@ -209,6 +241,19 @@ class EnsembleTrainingConfig:
 
     def enabled_attackers(self) -> list[AttackPolicy]:
         return self.attack_ensemble().enabled_attackers()
+
+    def all_eval_attackers(self) -> list[AttackPolicy]:
+        return list(self.eval_attackers) if self.eval_attackers else self.all_attackers()
+
+    def enabled_eval_attackers(self) -> list[AttackPolicy]:
+        policies = self.eval_attackers if self.eval_attackers else self.all_attackers()
+        return [policy for policy in policies if policy.enabled and policy.weight > 0]
+
+    def all_recognizers(self) -> list[RecognizerPolicy]:
+        return self.recognizer_ensemble_config().all_recognizers()
+
+    def enabled_recognizers(self) -> list[RecognizerPolicy]:
+        return self.recognizer_ensemble_config().enabled_recognizers()
 
 
 def default_mode_b_config(train_dir: Path, val_dir: Path, output_dir: Path) -> EnsembleTrainingConfig:
@@ -346,6 +391,10 @@ def _policy_from_dict(data: dict) -> AttackPolicy:
     return AttackPolicy(**data)
 
 
+def _recognizer_policy_from_dict(data: dict) -> RecognizerPolicy:
+    return RecognizerPolicy(**data)
+
+
 def _split_legacy_attack_policies(policies: list[AttackPolicy]) -> tuple[list[AttackPolicy], list[AttackPolicy]]:
     primary: list[AttackPolicy] = []
     surrogate: list[AttackPolicy] = []
@@ -428,10 +477,13 @@ def config_from_dict(data: dict) -> EnsembleTrainingConfig:
     else:
         primary_attackers = [_policy_from_dict(item) for item in (raw_primary or [])]
         surrogate_attackers = [_policy_from_dict(item) for item in (raw_surrogate or [])]
+    eval_attackers = [_policy_from_dict(item) for item in data.get("eval_attackers", [])]
     config_data = {
         **data,
         "primary_attackers": primary_attackers,
         "surrogate_attackers": surrogate_attackers,
+        "eval_attackers": eval_attackers,
+        "recognizer_ensemble": [_recognizer_policy_from_dict(item) for item in data.get("recognizer_ensemble", [])],
     }
     config_data = _portable_config_paths(config_data)
     config_data.pop("attacks", None)
@@ -469,7 +521,15 @@ def config_from_dict(data: dict) -> EnsembleTrainingConfig:
             f"Unsupported lr_scale_mode '{config_data.get('lr_scale_mode')}'. "
             "Supported values are 'linear' and 'sqrt'."
         )
-    for key in ("primary_attackers", "surrogate_attackers"):
+    raw_recognizer_weight_strategy = str(config_data.get("recognizer_weight_strategy", "static")).strip().lower()
+    if raw_recognizer_weight_strategy in {"static", "loss_proportional"}:
+        config_data["recognizer_weight_strategy"] = raw_recognizer_weight_strategy
+    else:
+        raise ValueError(
+            f"Unsupported recognizer_weight_strategy '{config_data.get('recognizer_weight_strategy')}'. "
+            "Supported values are 'static' and 'loss_proportional'."
+        )
+    for key in ("primary_attackers", "surrogate_attackers", "eval_attackers"):
         policies = config_data.get(key) or []
         for policy in policies:
             if isinstance(policy, dict):

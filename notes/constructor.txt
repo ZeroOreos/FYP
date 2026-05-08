@@ -7,6 +7,7 @@ Goal
 - Use the strongest research-backed recipe that is still practical in this repo without overstating what the literature has already standardized.
 - Test one blunt question: does attack-pool diversity beat strongest-single-attack training.
 - Test one second question: how should recognizer ensembles be used productively instead of cosmetically.
+- Target claim strength: a moderately strong multi-recognizer, multi-attack ensemble should improve robustness and transfer materially over cleaner or narrower baselines, while paying a visible but controlled clean-performance cost.
 
 Paper position
 - This is a recognizer-hardening project.
@@ -18,6 +19,51 @@ Paper position
 - Files under `notes/reports/` are downstream report documents only.
 - Reports base themselves on the repo; the repo must not be reinterpreted to match a stale report draft.
 - When report wording conflicts with code, configs, run outputs, or these core notes, update the report and keep the repo-side source of truth unchanged.
+
+Current paper-strength interpretation
+- The defended main condition should now be described as `full-ensemble`.
+- `full-ensemble` is the condition intended to support the paper’s architectural claim.
+- That claim is specifically:
+- one explicit target recognizer
+- one explicit external recognizer ensemble
+- one explicit attacker ensemble
+- joint pressure from both ensembles onto the target recognizer
+- Do not collapse this back into the older `joint_pool` wording.
+- `joint_pool` remains a legacy composite-target path and should not be treated as the canonical paper interpretation.
+- The current paper-ready target backbone is `iResNet100` for both the serious test path and the main run.
+- The current trusted verification-stage contract is the successful `full-ensemble-test` setup:
+- warmup `128`
+- shallow `48`
+- full `32`
+- attack chunk `32`
+- `2/1/1` stage schedule
+- recognizer ensemble enabled
+- attacker ensemble enabled
+- Any later config drift should be reset back to that successful test contract before changing only the dimensions needed for the longer paper run.
+- The current main full-paper condition extends that same contract rather than changing the basic method:
+- warmup `128`
+- shallow `48`
+- full `32`
+- same recognizer ensemble
+- same attacker ensemble
+- longer `24` epoch schedule with `3/9/12` stage split
+- The method claim should be treated as architecture-strong but result-dependent:
+- architecture claim can be made from the implementation
+- effectiveness claim must come from the finished ladder results
+- Verification is part of the intended paper metric surface, but it must be implemented efficiently enough not to distort the main training loop.
+- Robustness evaluation is now separated from training attackers through `eval_attackers`, so clean-only and recognizer-only rows can be trained without adversarial pressure but still receive a final fair `PGD/BPFA/DFANet` robust evaluation.
+- The current verification path should be described as:
+- deduplicate unique pair-image references first
+- batch image loading through a dataloader
+- prefer extracted image-file references instead of random-access shard-member references when available
+- resize verification images on the CPU side before transfer
+- batch embedding extraction on GPU
+- vectorize cosine scoring in chunks
+- compute verification metrics exactly from sorted scores and cumulative TP/FP counts rather than threshold-grid approximations
+- report progress for embedding extraction, DDP gather, scoring, and metric computation during verification probes
+- keep the verification metrics unchanged while moving more of the work to the GPU side
+- This is a performance implementation detail, not a metric-definition change.
+- Use `scripts/probe_verification.py` when verification appears to stall; it isolates pair-bundle IO, embedding extraction, DDP sharding, and scoring throughput from the rest of training.
 
 Research anchors
 - `ArcFace` is still the main baseline margin-loss line.
@@ -49,17 +95,22 @@ Core hypothesis
 - Recognizer diversity and attack diversity should improve robustness transfer across unseen recognizers and unseen attacks.
 - Surrogate diversity on the attack side matters at least as much as perturbation diversity.
 - Any robustness gain must be reported next to clean-performance loss.
+- Expected outcome shape: the biggest separations should appear in robust accuracy, robust loss, attack success rate, and transfer behavior, not necessarily in clean accuracy alone.
+- Expected ranking shape: clean-only baseline should be strongest on clean metrics, while the broader multi-attack and multi-recognizer conditions should be strongest on broad robustness if the claim is correct.
 
 Best training approach for this repo
 - Train and evaluate the system as ensemble-aware recognizer hardening.
 - Build directly toward the final trainable system, then scale backbone and dataset once the contract is verified.
 - Keep the defended side heterogeneous and small, not wide and redundant.
-- The current engineering path now includes a joint defended recognizer pool implementation.
-- Train the defended recognizer pool jointly when the code path is stable enough to support it.
-- Keep the attacker side diverse and explicit even when the defended recognizers are optimized together.
+- The current engineering path includes both a legacy `joint_pool` composite target and a newer external recognizer-ensemble path.
+- Do not collapse those two ideas in the paper wording.
+- `joint_pool` means one composite target with internal recognizer heads.
+- the paper goal means one target model trained under external recognizer-ensemble pressure plus attacker-ensemble pressure.
+- Keep the attacker side diverse and explicit in both paths.
 - Use the recognizer ensemble and attacker ensemble for attack generation, hard-pair mining, sampling pressure, and transfer evaluation.
 - Keep the target loss simple and strong: margin-based identity classification plus clean/adversarial consistency and targeted hard-sample emphasis.
-- The current claim direction is: we train a joint defended recognizer pool under rotating attacker-family pressure and test whether pooled supervision improves robustness transfer.
+- The claim direction should now prefer explicit target-plus-ensembles wording over the older joint-pool wording.
+- The paper wording should present the full condition as a moderately strong ensemble recipe, not as a claim of a finalized or dominant FR robustness standard.
 - Under a local `20GB` class budget, do not start with full adversarial pressure.
 - Use a `3`-stage depth curriculum: clean warmup, shallow adversarial depth, then full adversarial depth.
 - Stage `1` should be clean-only so the backbone and embedding geometry stabilize first.
@@ -67,8 +118,28 @@ Best training approach for this repo
 - Stage `3` should use the full primary-attacker rotation and the final attack budgets.
 - Heavy semantic attacks should stay periodic or eval-time and appear only late if used at all.
 - Full robust evaluation should be periodic and mostly posthoc, not always-on inside every epoch.
+- Verification can be more frequent than full robust evaluation, but if it is kept in-loop it should not overlap with the heaviest robust-eval epochs and should use the batched path above.
 - `ArcFace` is the main tuned recipe.
 - `CosFace` and `CurricularFace` are part of the defended recognizer ensemble, not side baselines.
+- Completed ladder evidence supports the intended shape of the claim: `full-ensemble` trades clean validation and runtime for stronger final robust validation than `attack-ensemble-only`.
+- Final clean validation across the pulled ladder: `baseline-clean` `99.23%`, `recognizer-ensemble-only` `99.23%`, `attack-ensemble-only` `93.98%`, `full-ensemble` `93.40%`, and `single-attack-only` `79.69%`.
+- Final robust validation across the attacked rows: `single-attack-only` `30.00%` under its trained `PGD` eval, `attack-ensemble-only` `52.32%` averaged over `PGD/BPFA/DFANet`, and `full-ensemble` `56.55%` averaged over `PGD/BPFA/DFANet`.
+- Comparability caveat: rerun `single-attack-only` posthoc robust with the shared `PGD/BPFA/DFANet` eval suite before using it in an averaged robustness table.
+- Final `full-ensemble` versus `attack-ensemble-only`: robust accuracy `56.55%` versus `52.32%`, average attack success `39.45%` versus `44.32%`.
+- The robustness gain appears across all trained in-loop attack families in the final all-attack eval: `PGD` `52.55%` versus `45.45%`, `BPFA` `69.56%` versus `66.09%`, and `DFANet` `47.55%` versus `45.43%`.
+- Final posthoc verification is strongest for clean and recognizer-only rows, while attacked rows pay a visible verification cost.
+- `attack-ensemble-only` final posthoc verification is still strong: pair accuracy `98.33%`, `EER=1.78%`, `ROC-AUC=99.75%`.
+- `single-attack-only` final posthoc verification is weak: pair accuracy `89.74%`, `EER=12.82%`, `ROC-AUC=92.01%`.
+- Final `full-ensemble` posthoc verification is now pulled locally: pair accuracy `98.21%`, `EER=1.93%`, `ROC-AUC=99.73%`.
+- Local artifact caveat: the currently pulled `baseline-clean/posthoc-robust.json` and `recognizer-ensemble-only/posthoc-robust.json` are skipped artifacts with `reason=no_attackers`; rerun those posthoc robust probes after syncing the `eval_attackers` patch before comparing clean-only or recognizer-only robustness against attacked rows.
+- Local artifact caveat: `single-attack-only` also needs a shared-suite posthoc robust probe because the fair paper comparison should evaluate every row against the same `PGD/BPFA/DFANet` suite.
+- Crosscheck caveat: older `summary.json.best` fields used max-is-best for every metric, so `best.val_verification_eer` and `best.val_robust_attack_success_rate` are not paper-safe in existing artifacts; use final/latest/posthoc values instead.
+- Paper should argue robustness benefit rather than clean or verification dominance from recognizer ensembling.
+- Posthoc verification should be labeled as embedding verification when classifier/margin weights are skipped because the current manifest class count differs from the checkpoint class count.
+- The paper should explicitly list modern attacker stress testing as the next step rather than implying it is already covered by the current in-loop attack families.
+- The current ladder supports the framework and ablation claim; modern transfer, diffusion/makeup, morphing, and physical-style attackers require faithful separate implementations or cached generated adversarial images before they can be counted as evidence.
+- The recommended future stress lineup is higher-budget `PGD`/CW/APGD-style checks, TransMix-style transfer attacks, diffusion or adversarial-makeup attacks, Greedy-DiM-style morphing evaluation, and FR-plus-FAS/PAD realism tests.
+- Do not relabel existing `PGD`, `BPFA`, or `DFANet` outputs as modern stress attacks; the paper should keep them as the trained/in-loop attacker family and reserve modern attackers for follow-up validation.
 
 Primary target
 - Base defended recognizer set: `ArcFace` + `CosFace` + `CurricularFace`.
@@ -139,7 +210,7 @@ Method rules
 - do not brute-force every combination
 - prefer aligned and documented public training sets over ad hoc local mixtures
 - if local storage is capped around `20GB`, prefer `WebFace4M` over a poorly justified `WF42M` slice
-- keep a base set and an extended set; do not collapse everything into one monolithic experiment matrix
+- keep a base set and an extended set; do not collapse everything into one monolithic experiment suite
 - use broader surrogate diversity for attack generation than for the defended training target list
 - keep early clean fraction high and early hard-pair weight low so the classifier learns identities before the attack pressure dominates
 - treat a `WebFace4M` slice as medium-scale adversarial fine-tuning rather than pretending it is full-scale pretraining
@@ -155,6 +226,7 @@ Success condition
 - The repo can scale from that verified small-backbone contract to the final chosen backbone without changing the fundamental training design.
 - The paper can show whether rotating attack-pool diversity improves robustness on seen and unseen attacks without hiding the clean-cost tradeoff.
 - The paper can show transfer robustness across unseen recognizers and report OOD corruption and variation robustness, not adversarial robustness alone.
+- The paper can show that the multi-recognizer, multi-attack condition beats narrower ablations by a meaningful but not magical margin on robustness-oriented metrics.
 
 References
 - `[R1]` OODFace: Benchmarking Robustness of Face Recognition under Common Corruptions and Appearance Variations. Main support for broad robustness evaluation and the claim that adversarial robustness alone is too narrow. https://arxiv.org/abs/2412.02479

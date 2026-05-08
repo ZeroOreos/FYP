@@ -17,6 +17,7 @@ from Training.arcface import (
     PartialFCArcMarginProduct,
     SubCenterArcMarginProduct,
 )
+from Training.config import RecognizerPolicy
 from Utility.runtime import resolve_torch_device
 
 
@@ -286,6 +287,201 @@ class TargetSelfSurrogate(SurrogateWrapper):
 
     def embed(self, images: torch.Tensor) -> torch.Tensor:
         return self.module.forward_embeddings(images)
+
+
+class ExternalRecognizerHead(nn.Module):
+    def __init__(
+        self,
+        *,
+        name: str,
+        num_classes: int,
+        embedding_dim: int,
+        arcface_scale: float,
+        arcface_margin: float,
+        use_partial_fc: bool,
+        partial_fc_negative_sample_rate: float,
+        sub_center_count: int,
+    ) -> None:
+        super().__init__()
+        lowered = name.strip().lower()
+        if lowered == "arcface":
+            if use_partial_fc:
+                self.margin = PartialFCArcMarginProduct(
+                    embedding_dim,
+                    num_classes,
+                    s=arcface_scale,
+                    m=arcface_margin,
+                    negative_sample_rate=partial_fc_negative_sample_rate,
+                    sub_center_count=sub_center_count,
+                )
+            else:
+                if sub_center_count > 1:
+                    self.margin = SubCenterArcMarginProduct(
+                        embedding_dim,
+                        num_classes,
+                        s=arcface_scale,
+                        m=arcface_margin,
+                        sub_center_count=sub_center_count,
+                    )
+                else:
+                    self.margin = ArcMarginProduct(
+                        embedding_dim,
+                        num_classes,
+                        s=arcface_scale,
+                        m=arcface_margin,
+                    )
+        elif lowered == "cosface":
+            self.margin = CosFaceMarginProduct(
+                embedding_dim,
+                num_classes,
+                s=arcface_scale,
+                m=0.35,
+            )
+        elif lowered == "curricularface":
+            self.margin = CurricularFaceMarginProduct(
+                embedding_dim,
+                num_classes,
+                s=arcface_scale,
+                m=arcface_margin,
+            )
+        else:
+            raise ValueError(
+                f"Unsupported recognizer ensemble member '{name}'. "
+                "Supported values are 'arcface', 'cosface', and 'curricularface'."
+            )
+        self.name = lowered
+
+    def training_outputs(
+        self,
+        embeddings: torch.Tensor,
+        labels: torch.Tensor,
+        *,
+        class_subset: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        margin_outputs = self.margin.training_outputs(embeddings, labels, class_subset=class_subset)
+        loss_labels = margin_outputs.get("loss_labels", labels)
+        loss_per_sample = F.cross_entropy(margin_outputs["logits"], loss_labels, reduction="none")
+        return {
+            "logits": margin_outputs["logits"],
+            "loss_labels": loss_labels,
+            "predict_logits": margin_outputs["predict_logits"],
+            "loss_per_sample": loss_per_sample,
+            "loss": loss_per_sample.mean(),
+        }
+
+    def inference_logits(self, embeddings: torch.Tensor) -> torch.Tensor:
+        return self.margin.inference_logits(embeddings)
+
+
+class ExternalRecognizerEnsemble(nn.Module):
+    def __init__(
+        self,
+        *,
+        recognizers: list[RecognizerPolicy],
+        num_classes: int,
+        embedding_dim: int,
+        arcface_scale: float,
+        arcface_margin: float,
+        use_partial_fc: bool,
+        partial_fc_negative_sample_rate: float,
+        sub_center_count: int,
+        weight_strategy: str = "static",
+    ) -> None:
+        super().__init__()
+        self.recognizer_specs = [policy for policy in recognizers if policy.enabled and policy.weight > 0]
+        self.member_names = tuple(policy.name.strip().lower() for policy in self.recognizer_specs)
+        self.member_weights = self._normalize_member_weights(self.recognizer_specs)
+        self.use_partial_fc = bool(use_partial_fc)
+        self.partial_fc_negative_sample_rate = float(partial_fc_negative_sample_rate)
+        self.num_classes = int(num_classes)
+        self.weight_strategy = str(weight_strategy).strip().lower()
+        self.heads = nn.ModuleDict(
+            {
+                policy.name.strip().lower(): ExternalRecognizerHead(
+                    name=policy.name,
+                    num_classes=num_classes,
+                    embedding_dim=embedding_dim,
+                    arcface_scale=arcface_scale,
+                    arcface_margin=arcface_margin,
+                    use_partial_fc=use_partial_fc,
+                    partial_fc_negative_sample_rate=partial_fc_negative_sample_rate,
+                    sub_center_count=sub_center_count,
+                )
+                for policy in self.recognizer_specs
+            }
+        )
+
+    @staticmethod
+    def _normalize_member_weights(recognizers: list[RecognizerPolicy]) -> dict[str, float]:
+        if not recognizers:
+            return {}
+        total = sum(max(0.0, float(policy.weight)) for policy in recognizers)
+        if total <= 0:
+            uniform = 1.0 / float(len(recognizers))
+            return {policy.name.strip().lower(): uniform for policy in recognizers}
+        return {
+            policy.name.strip().lower(): max(0.0, float(policy.weight)) / total
+            for policy in recognizers
+        }
+
+    def enabled(self) -> bool:
+        return bool(self.recognizer_specs)
+
+    def forward_from_embeddings(
+        self,
+        embeddings: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> dict[str, dict[str, torch.Tensor]]:
+        if not self.recognizer_specs:
+            return {}
+        shared_subset = None
+        if self.use_partial_fc:
+            shared_subset = build_shared_class_subset(
+                labels,
+                out_features=self.num_classes,
+                sample_rate=self.partial_fc_negative_sample_rate,
+            )
+        outputs: dict[str, dict[str, torch.Tensor]] = {}
+        for name in self.member_names:
+            head_outputs = self.heads[name].training_outputs(embeddings, labels, class_subset=shared_subset)
+            outputs[name] = {
+                "embeddings": embeddings,
+                **head_outputs,
+            }
+        return outputs
+
+    def forward(
+        self,
+        embeddings: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> dict[str, dict[str, torch.Tensor]]:
+        return self.forward_from_embeddings(embeddings, labels)
+
+    def predict_logits_from_embeddings(self, embeddings: torch.Tensor) -> torch.Tensor:
+        if not self.recognizer_specs:
+            raise RuntimeError("Recognizer ensemble is empty.")
+        member_logits = {
+            name: self.heads[name].inference_logits(embeddings)
+            for name in self.member_names
+        }
+        return sum(self.member_weights[name] * member_logits[name] for name in self.member_names)
+
+    def predict_eval_outputs_from_embeddings(
+        self,
+        embeddings: torch.Tensor,
+    ) -> dict[str, torch.Tensor | dict[str, torch.Tensor] | None]:
+        if not self.recognizer_specs:
+            raise RuntimeError("Recognizer ensemble is empty.")
+        member_logits = {
+            name: self.heads[name].inference_logits(embeddings)
+            for name in self.member_names
+        }
+        pooled_logits = sum(self.member_weights[name] * member_logits[name] for name in self.member_names)
+        return {
+            "embeddings": embeddings,
+            "predict_logits": pooled_logits,
+            "member_logits": member_logits,
+        }
 
 
 class JointRecognizerPool(nn.Module):
@@ -578,6 +774,36 @@ def build_target_model(
         )
     model = model.to(device)
     return model, device
+
+
+def build_recognizer_ensemble(
+    *,
+    recognizer_specs: list[RecognizerPolicy],
+    num_classes: int,
+    embedding_dim: int,
+    device: torch.device,
+    arcface_scale: float,
+    arcface_margin: float,
+    use_partial_fc: bool,
+    partial_fc_negative_sample_rate: float,
+    sub_center_count: int,
+    weight_strategy: str = "static",
+) -> ExternalRecognizerEnsemble | None:
+    enabled = [policy for policy in recognizer_specs if policy.enabled and policy.weight > 0]
+    if not enabled:
+        return None
+    ensemble = ExternalRecognizerEnsemble(
+        recognizers=enabled,
+        num_classes=num_classes,
+        embedding_dim=embedding_dim,
+        arcface_scale=arcface_scale,
+        arcface_margin=arcface_margin,
+        use_partial_fc=use_partial_fc,
+        partial_fc_negative_sample_rate=partial_fc_negative_sample_rate,
+        sub_center_count=sub_center_count,
+        weight_strategy=weight_strategy,
+    )
+    return ensemble.to(device)
 
 
 def build_surrogates(

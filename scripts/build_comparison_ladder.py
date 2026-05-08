@@ -86,6 +86,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def _latest_checkpoint(run_dir: Path) -> Path:
+    latest = run_dir / "checkpoints" / "latest.pth"
+    if latest.exists():
+        return latest
     checkpoints = sorted((run_dir / "checkpoints").glob("epoch_*.pth"))
     if not checkpoints:
         raise RuntimeError(f"No checkpoints found in {run_dir}")
@@ -123,7 +126,11 @@ def _load_manifest_label_maps(*manifest_paths: Path) -> tuple[dict[str, int], di
                 if not line.strip():
                     continue
                 item = json.loads(line)
-                source = f"{Path(item['shard_path']).resolve()}::{item['key']}.jpg"
+                image_path = item.get("image_path")
+                if image_path is not None and Path(str(image_path)).expanduser().resolve().is_file():
+                    source = str(Path(str(image_path)).expanduser().resolve())
+                else:
+                    source = f"{Path(item['shard_path']).resolve()}::{item['key']}.jpg"
                 label_by_source[source] = int(item["label_idx"])
                 rel_path_by_source[source] = str(item["rel_path"])
     return label_by_source, rel_path_by_source
@@ -493,7 +500,7 @@ def build_report(run_entries: list[dict[str, object]], output_json: Path, output
             }
         )
 
-    transfer_matrix: list[dict[str, object]] = []
+    cross_run_transfer: list[dict[str, object]] = []
     for target_info in run_infos:
         target_run = Path(target_info["run_dir"])
         target_config, target_model = loaded_models[str(target_run)]
@@ -524,7 +531,7 @@ def build_report(run_entries: list[dict[str, object]], output_json: Path, output
                 )
                 adv_scores = _compute_pair_scores(attacked_embeddings, clean_embeddings, pair_bundle["img1_paths"], pair_bundle["img2_paths"])
                 operating = _pair_operating_metrics(adv_scores, pair_bundle["labels"], operating_threshold)
-                transfer_matrix.append(
+                cross_run_transfer.append(
                     {
                         "target_run_dir": str(target_run),
                         "source_run_dir": str(source_run),
@@ -550,7 +557,7 @@ def build_report(run_entries: list[dict[str, object]], output_json: Path, output
         seen_items = list(run["whitebox_verification_by_attack"].values())
         unseen_items = [
             item
-            for item in transfer_matrix
+            for item in cross_run_transfer
             if item["target_run_dir"] == run["run_dir"]
             and item["attack_family"] not in set(run["seen_attack_families"])
         ]
@@ -572,7 +579,7 @@ def build_report(run_entries: list[dict[str, object]], output_json: Path, output
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "device": device_name,
         "runs": run_infos,
-        "transfer_matrix": transfer_matrix,
+        "cross_run_transfer": cross_run_transfer,
     }
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_json.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -679,8 +686,8 @@ def _to_markdown(report: dict[str, object]) -> str:
             f"{(gap.get('gap_tar_at_far_1e_5') or 0.0):.4f} |"
         )
     lines.append("")
-    lines.extend(["## Transfer Matrix", "", "| Target | Source | Attack | Family | TAR Drop | Impersonation SR | Dodging SR | Overall ASR |", "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |"])
-    for item in report["transfer_matrix"]:
+    lines.extend(["## Cross-Run Attack Transfer", "", "| Target | Source | Attack | Family | TAR Drop | Impersonation SR | Dodging SR | Overall ASR |", "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |"])
+    for item in report["cross_run_transfer"]:
         lines.append(
             "| "
             f"{item['target_label']} | "

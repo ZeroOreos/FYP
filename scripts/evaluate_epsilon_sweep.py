@@ -102,7 +102,11 @@ def _load_manifest_label_maps(*manifest_paths: Path) -> tuple[dict[str, int], di
                 if not line.strip():
                     continue
                 item = json.loads(line)
-                source = f"{Path(item['shard_path']).resolve()}::{item['key']}.jpg"
+                image_path = item.get("image_path")
+                if image_path is not None and Path(str(image_path)).expanduser().resolve().is_file():
+                    source = str(Path(str(image_path)).expanduser().resolve())
+                else:
+                    source = f"{Path(item['shard_path']).resolve()}::{item['key']}.jpg"
                 label_by_source[source] = int(item["label_idx"])
                 rel_path_by_source[source] = str(item["rel_path"])
     return label_by_source, rel_path_by_source

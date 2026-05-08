@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 import warnings
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import timedelta
 from importlib.util import find_spec
 from pathlib import Path
@@ -31,7 +31,7 @@ from Training.dataset import build_dataloaders, build_eval_loader, build_train_l
 from Training.evaluate import choose_eval_policy, evaluate_clean, evaluate_robust, evaluate_robust_all, evaluate_verification_pairs
 from Training.losses import classification_accuracy, classification_accuracy_tensor, embedding_consistency_loss
 from Training.pairing import HardPairMiningResult, mine_hard_pairs
-from Training.recognizers import build_surrogates, build_target_model
+from Training.recognizers import build_recognizer_ensemble, build_surrogates, build_target_model
 
 
 def set_seed(seed: int) -> None:
@@ -193,7 +193,41 @@ def _ddp_logging_data(model: torch.nn.Module) -> dict[str, Any]:
     return dict(data) if isinstance(data, dict) else {}
 
 
-def _make_optimizer(config: EnsembleTrainingConfig, model: torch.nn.Module):
+@contextlib.contextmanager
+def _ddp_no_sync(*modules: torch.nn.Module | None):
+    with contextlib.ExitStack() as stack:
+        for module in modules:
+            if isinstance(module, DistributedDataParallel):
+                stack.enter_context(module.no_sync())
+        yield
+
+
+def _trainable_parameters(*modules: torch.nn.Module | None) -> list[torch.nn.Parameter]:
+    params: list[torch.nn.Parameter] = []
+    seen: set[int] = set()
+    for module in modules:
+        if module is None:
+            continue
+        for param in module.parameters():
+            if not param.requires_grad:
+                continue
+            param_id = id(param)
+            if param_id in seen:
+                continue
+            seen.add(param_id)
+            params.append(param)
+    if not params:
+        raise RuntimeError("No trainable parameters were provided to the optimizer.")
+    return params
+
+
+def _parameter_count(module: torch.nn.Module | None) -> int:
+    if module is None:
+        return 0
+    return sum(param.numel() for param in module.parameters() if param.requires_grad)
+
+
+def _make_optimizer(config: EnsembleTrainingConfig, *modules: torch.nn.Module | None):
     optimizer_kwargs: dict[str, object] = {}
     if config.optimizer_foreach is not None:
         optimizer_kwargs["foreach"] = bool(config.optimizer_foreach)
@@ -206,11 +240,12 @@ def _make_optimizer(config: EnsembleTrainingConfig, model: torch.nn.Module):
         )
         optimizer_kwargs["fused"] = False
 
+    params = _trainable_parameters(*modules)
     if config.optimizer_name.lower() == "sgd":
         signature = inspect.signature(torch.optim.SGD)
         filtered_kwargs = {key: value for key, value in optimizer_kwargs.items() if key in signature.parameters}
         return torch.optim.SGD(
-            model.parameters(),
+            params,
             lr=_resolved_learning_rate(config),
             momentum=config.momentum,
             weight_decay=config.weight_decay,
@@ -220,7 +255,7 @@ def _make_optimizer(config: EnsembleTrainingConfig, model: torch.nn.Module):
         signature = inspect.signature(torch.optim.AdamW)
         filtered_kwargs = {key: value for key, value in optimizer_kwargs.items() if key in signature.parameters}
         return torch.optim.AdamW(
-            model.parameters(),
+            params,
             lr=_resolved_learning_rate(config),
             weight_decay=config.weight_decay,
             **filtered_kwargs,
@@ -284,7 +319,69 @@ def _resolve_mixed_precision_dtype(
     return None
 
 
-def _save_checkpoint(output_dir: Path, epoch: int, model, optimizer, scheduler, scaler, history: list[dict]) -> Path:
+_RESUME_SIGNATURE_IGNORED_KEYS = {
+    "output_dir",
+    "resume_from",
+    "checkpoint_every",
+    "log_every_batches",
+}
+
+
+def _training_signature(config: EnsembleTrainingConfig, *, class_count: int) -> dict[str, object]:
+    payload = asdict(config)
+    for key in _RESUME_SIGNATURE_IGNORED_KEYS:
+        payload.pop(key, None)
+    payload["class_count"] = int(class_count)
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return {
+        "version": 1,
+        "sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+        "class_count": int(class_count),
+        "payload": payload,
+    }
+
+
+def _check_resume_signature(
+    checkpoint: dict[str, Any],
+    *,
+    expected_signature: dict[str, object],
+) -> None:
+    stored_signature = checkpoint.get("training_signature")
+    if stored_signature is None:
+        warnings.warn(
+            "Checkpoint has no training signature; resume cannot be treated as paper-clean. "
+            "Use a fresh run for final experiments.",
+            stacklevel=2,
+        )
+        return
+    stored_hash = str(stored_signature.get("sha256"))
+    expected_hash = str(expected_signature.get("sha256"))
+    if stored_hash != expected_hash:
+        if _truthy(os.environ.get("FYP_ALLOW_SIGNATURE_MISMATCH", "0")):
+            warnings.warn(
+                "Training signature mismatch ignored because FYP_ALLOW_SIGNATURE_MISMATCH=1.",
+                stacklevel=2,
+            )
+            return
+        raise RuntimeError(
+            "Checkpoint training signature does not match the current config/class universe. "
+            f"checkpoint_sha={stored_hash} current_sha={expected_hash}. "
+            "Start a fresh run or set FYP_ALLOW_SIGNATURE_MISMATCH=1 only for debugging."
+        )
+
+
+def _save_checkpoint(
+    output_dir: Path,
+    epoch: int,
+    model,
+    optimizer,
+    scheduler,
+    scaler,
+    history: list[dict],
+    *,
+    recognizer_ensemble=None,
+    training_signature: dict[str, object] | None = None,
+) -> Path:
     checkpoint_dir = output_dir / "checkpoints"
     checkpoint_path = checkpoint_dir / "latest.pth"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -292,17 +389,18 @@ def _save_checkpoint(output_dir: Path, epoch: int, model, optimizer, scheduler, 
         if stale_path != checkpoint_path:
             stale_path.unlink(missing_ok=True)
     base_model = _unwrap_model(model)
-    torch.save(
-        {
-            "epoch": epoch,
-            "model_state_dict": base_model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "scheduler_state_dict": scheduler.state_dict(),
-            "scaler_state_dict": scaler.state_dict() if getattr(scaler, "is_enabled", lambda: False)() else None,
-            "history": history,
-        },
-        checkpoint_path,
-    )
+    payload = {
+        "epoch": epoch,
+        "model_state_dict": base_model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict(),
+        "scaler_state_dict": scaler.state_dict() if getattr(scaler, "is_enabled", lambda: False)() else None,
+        "history": history,
+        "training_signature": training_signature,
+    }
+    if recognizer_ensemble is not None:
+        payload["recognizer_ensemble_state_dict"] = _unwrap_model(recognizer_ensemble).state_dict()
+    torch.save(payload, checkpoint_path)
     return checkpoint_path
 
 
@@ -310,12 +408,24 @@ def _load_checkpoint(
     checkpoint_path: Path,
     *,
     model,
+    recognizer_ensemble=None,
     optimizer,
     scheduler,
     scaler,
+    expected_signature: dict[str, object] | None = None,
 ) -> tuple[int, list[dict]]:
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    if expected_signature is not None:
+        _check_resume_signature(checkpoint, expected_signature=expected_signature)
     _unwrap_model(model).load_state_dict(checkpoint["model_state_dict"])
+    recognizer_state = checkpoint.get("recognizer_ensemble_state_dict")
+    if recognizer_ensemble is not None:
+        if recognizer_state is None:
+            raise RuntimeError(
+                "Checkpoint has no recognizer_ensemble_state_dict. "
+                "A trainable recognizer ensemble cannot be resumed from this legacy checkpoint for paper runs."
+            )
+        _unwrap_model(recognizer_ensemble).load_state_dict(recognizer_state)
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
     scaler_state = checkpoint.get("scaler_state_dict")
@@ -587,35 +697,49 @@ def _joint_member_outputs(
     return outputs
 
 
-def _joint_member_weights(model: Any, member_outputs: dict[str, dict[str, torch.Tensor]]) -> dict[str, float]:
-    weights = getattr(model, "member_weights", None)
+def _member_weights_from_source(weight_source: Any, member_outputs: dict[str, dict[str, torch.Tensor]]) -> dict[str, float]:
+    weight_source = _unwrap_model(weight_source)
+    weights = getattr(weight_source, "member_weights", None)
     if not weights:
         uniform = 1.0 / float(max(1, len(member_outputs)))
-        return {name: uniform for name in member_outputs}
-    total = sum(float(weights.get(name, 0.0)) for name in member_outputs)
-    if total <= 0:
-        uniform = 1.0 / float(max(1, len(member_outputs)))
-        return {name: uniform for name in member_outputs}
-    return {name: float(weights.get(name, 0.0)) / total for name in member_outputs}
+        base_weights = {name: uniform for name in member_outputs}
+    else:
+        total = sum(float(weights.get(name, 0.0)) for name in member_outputs)
+        if total <= 0:
+            uniform = 1.0 / float(max(1, len(member_outputs)))
+            base_weights = {name: uniform for name in member_outputs}
+        else:
+            base_weights = {name: float(weights.get(name, 0.0)) / total for name in member_outputs}
+    strategy = str(getattr(weight_source, "weight_strategy", "static")).strip().lower()
+    if strategy != "loss_proportional":
+        return base_weights
+    adaptive_scores = {
+        name: max(1e-8, float(item["loss"].detach().item())) * max(1e-8, base_weights.get(name, 0.0))
+        for name, item in member_outputs.items()
+    }
+    adaptive_total = sum(adaptive_scores.values())
+    if adaptive_total <= 0:
+        return base_weights
+    return {name: adaptive_scores[name] / adaptive_total for name in member_outputs}
 
 
 def _weighted_member_loss_per_sample(
-    model: Any,
+    weight_source: Any,
     member_outputs: dict[str, dict[str, torch.Tensor]],
 ) -> torch.Tensor:
-    weights = _joint_member_weights(model, member_outputs)
+    weights = _member_weights_from_source(weight_source, member_outputs)
     losses = [weights[name] * item["loss_per_sample"] for name, item in member_outputs.items()]
     return torch.stack(losses, dim=0).sum(dim=0)
 
 
 def _average_member_consistency(
-    model: Any,
+    weight_source: Any,
     clean_member_outputs: dict[str, dict[str, torch.Tensor]],
     adv_member_outputs: dict[str, dict[str, torch.Tensor]],
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     per_member: dict[str, torch.Tensor] = {}
     consistency_terms = []
-    weights = _joint_member_weights(model, clean_member_outputs)
+    weights = _member_weights_from_source(weight_source, clean_member_outputs)
     for name, clean_item in clean_member_outputs.items():
         adv_item = adv_member_outputs[name]
         value = embedding_consistency_loss(clean_item["embeddings"], adv_item["embeddings"])
@@ -672,6 +796,31 @@ def _finalize_member_epoch_metrics(
                 count = max(1.0, bucket_count)
                 finalized[name][key] = bucket_sum / count
     return finalized
+
+
+def _merge_metric_groups(
+    *groups: dict[str, dict[str, float]],
+) -> dict[str, dict[str, float]]:
+    merged: dict[str, dict[str, float]] = {}
+    for group in groups:
+        for name, metrics in group.items():
+            merged[name] = dict(metrics)
+    return merged
+
+
+def _accumulate_weight_profile(
+    totals: dict[str, dict[str, dict[str, torch.Tensor | float]]],
+    *,
+    prefix: str,
+    weights: dict[str, float],
+) -> None:
+    for name, value in weights.items():
+        _accumulate_member_epoch_metric(
+            totals,
+            name=f"{prefix}::{name}",
+            key="weight",
+            value=float(value),
+        )
 
 
 def _progress_bar(
@@ -736,15 +885,24 @@ def _estimate_epoch_attack_work(
     return max_steps
 
 
-def _should_run_eval(epoch: int, total_epochs: int, every: int) -> bool:
+def _should_run_eval(epoch: int, total_epochs: int, every: int, *, offset: int = 0, include_final: bool = True) -> bool:
     if every <= 0:
-        return epoch == total_epochs
-    return epoch == total_epochs or (epoch % every == 0)
+        return include_final and epoch == total_epochs
+    if include_final and epoch == total_epochs:
+        return True
+    return ((epoch - int(offset)) % every) == 0
 
 
 def _clear_device_caches(device: torch.device) -> None:
+    gc.collect()
+    if device.type == "cuda" and torch.cuda.is_available():
+        index = device.index if device.index is not None else torch.cuda.current_device()
+        with torch.cuda.device(index):
+            torch.cuda.empty_cache()
+            if hasattr(torch.cuda, "ipc_collect"):
+                torch.cuda.ipc_collect()
+        return
     if device.type == "mps":
-        gc.collect()
         if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
             torch.mps.empty_cache()
 
@@ -808,6 +966,21 @@ def _best_history_value(history: list[dict[str, object]], getter) -> float | Non
         except (TypeError, ValueError):
             continue
         if best is None or numeric > best:
+            best = numeric
+    return best
+
+
+def _lowest_history_value(history: list[dict[str, object]], getter) -> float | None:
+    best: float | None = None
+    for item in history:
+        value = getter(item)
+        if value is None:
+            continue
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        if best is None or numeric < best:
             best = numeric
     return best
 
@@ -1040,16 +1213,35 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
     base_model = _maybe_enable_channels_last(base_model, config, device)
     base_model = _maybe_compile_model(base_model, config)
     surrogates = build_surrogates(config.surrogate_models, base_model, device)
+    recognizer_ensemble = build_recognizer_ensemble(
+        recognizer_specs=config.enabled_recognizers(),
+        num_classes=len(class_to_idx),
+        embedding_dim=config.embedding_dim,
+        device=device,
+        arcface_scale=config.arcface_scale,
+        arcface_margin=config.arcface_margin,
+        use_partial_fc=config.use_partial_fc,
+        partial_fc_negative_sample_rate=(
+            config.partial_fc_negative_sample_rate
+            if config.recognizer_partial_fc_negative_sample_rate is None
+            else float(config.recognizer_partial_fc_negative_sample_rate)
+        ),
+        sub_center_count=config.sub_center_count,
+        weight_strategy=config.recognizer_weight_strategy,
+    )
+    if recognizer_ensemble is not None:
+        recognizer_ensemble = maybe_wrap_ddp(recognizer_ensemble, device, config, distributed)
     model = maybe_wrap_ddp(base_model, device, config, distributed)
     ddp_logging_data = _ddp_logging_data(model)
+    training_signature = _training_signature(config, class_count=len(class_to_idx))
 
-    optimizer = _make_optimizer(config, model)
+    optimizer = _make_optimizer(config, model, recognizer_ensemble)
     scheduler = _make_scheduler(config, optimizer)
     amp_dtype = _resolve_mixed_precision_dtype(config, device)
     scaler = _make_grad_scaler(config, device, amp_dtype)
 
     rng = random.Random(config.seed)
-    eval_policy = choose_eval_policy(config.all_attackers(), config.eval_attack_name)
+    eval_policy = choose_eval_policy(config.all_eval_attackers(), config.eval_attack_name)
     history: list[dict] = []
     start_epoch = 1
 
@@ -1057,9 +1249,11 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
         resumed_epoch, history = _load_checkpoint(
             resume_from,
             model=model,
+            recognizer_ensemble=recognizer_ensemble,
             optimizer=optimizer,
             scheduler=scheduler,
             scaler=scaler,
+            expected_signature=training_signature,
         )
         start_epoch = resumed_epoch + 1
 
@@ -1100,6 +1294,15 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
         )
         logger.info(f"[INFO] Aligner:       {config.alignment_detector} / {config.alignment_landmarks}-point / {config.normalized_crop_size}x{config.normalized_crop_size}")
         logger.info(f"[INFO] Surrogates:    {sorted(surrogates)}")
+        logger.info(f"[INFO] Rec ensemble:  {[policy.name for policy in config.enabled_recognizers()]}")
+        logger.info(
+            f"[INFO] Rec weights:    clean={config.recognizer_clean_weight} adv={config.recognizer_adv_weight} "
+            f"strategy={config.recognizer_weight_strategy}"
+        )
+        logger.info(
+            f"[INFO] Trainable params: target={_parameter_count(model):,} "
+            f"recognizers={_parameter_count(recognizer_ensemble):,}"
+        )
         logger.info(
             f"[INFO] Optimizer:     {config.optimizer_name} "
             f"base_lr={config.learning_rate} resolved_lr={resolved_learning_rate} momentum={config.momentum}"
@@ -1155,6 +1358,12 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
         model.train()
         schedule = _resolve_epoch_schedule(config, epoch)
         epoch_batch_size = _phase_batch_size(config, schedule.get("stage_name", ""))
+        recognizer_start_epoch = max(1, int(config.recognizer_start_epoch))
+        active_recognizer_ensemble = (
+            recognizer_ensemble
+            if recognizer_ensemble is not None and epoch >= recognizer_start_epoch
+            else None
+        )
         if epoch_batch_size != active_train_batch_size:
             train_loader = build_train_loader(
                 train_ds,
@@ -1179,13 +1388,19 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
 
         train_loss = torch.zeros((), device=device)
         train_acc = torch.zeros((), device=device)
+        train_clean_loss = torch.zeros((), device=device)
+        train_adv_loss = torch.zeros((), device=device)
+        train_recognizer_clean_loss = torch.zeros((), device=device)
+        train_recognizer_adv_loss = torch.zeros((), device=device)
         train_consistency = torch.zeros((), device=device)
         train_cached_hits = torch.zeros((), device=device)
         train_hard_pair_count = torch.zeros((), device=device)
         train_hard_sample_count = torch.zeros((), device=device)
         train_hard_pair_hardness = torch.zeros((), device=device)
         train_hard_loss = torch.zeros((), device=device)
-        train_member_metrics_totals: dict[str, dict[str, dict[str, torch.Tensor | float]]] = {}
+        train_joint_target_member_metrics_totals: dict[str, dict[str, dict[str, torch.Tensor | float]]] = {}
+        train_recognizer_metrics_totals: dict[str, dict[str, dict[str, torch.Tensor | float]]] = {}
+        train_recognizer_weight_profile_totals: dict[str, dict[str, dict[str, torch.Tensor | float]]] = {}
         batches = 0
         accumulation_steps = max(1, int(config.gradient_accumulation_steps))
         attacked_batches = 0
@@ -1216,6 +1431,7 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                 f" hard_pair_weight={float(schedule['hard_pair_weight']):.2f}"
                 f" approx_attack_iters={attack_work}"
                 f" attackers={_policy_names(epoch_attack_policies)}"
+                f" recognizers={'on' if active_recognizer_ensemble is not None else 'off'}"
             )
             if device.type == "cuda":
                 logger.info(f"[CUDA] epoch={epoch}/{config.epochs} start {_format_cuda_memory_stats(device)}")
@@ -1261,11 +1477,10 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                 sync_context = contextlib.nullcontext()
                 if (
                     config.ddp_no_sync_accumulation
-                    and isinstance(model, DistributedDataParallel)
                     and accumulation_steps > 1
                     and not should_step
                 ):
-                    sync_context = model.no_sync()
+                    sync_context = _ddp_no_sync(model, active_recognizer_ensemble)
 
                 with sync_context:
                     with _autocast_context(config, device):
@@ -1277,6 +1492,23 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                         clean_embeddings = clean_outputs["embeddings"]
                         clean_predict_logits = clean_outputs["predict_logits"]
                         clean_member_outputs = clean_outputs["member_outputs"]
+                        if active_recognizer_ensemble is not None:
+                            clean_recognizer_outputs = active_recognizer_ensemble(clean_embeddings, labels)
+                            _accumulate_weight_profile(
+                                train_recognizer_weight_profile_totals,
+                                prefix="clean",
+                                weights=_member_weights_from_source(active_recognizer_ensemble, clean_recognizer_outputs),
+                            )
+                            clean_recognizer_loss_per_sample = _weighted_member_loss_per_sample(
+                                active_recognizer_ensemble,
+                                clean_recognizer_outputs,
+                            )
+                            clean_recognizer_loss = clean_recognizer_loss_per_sample.mean()
+                        else:
+                            clean_recognizer_outputs = None
+                            clean_recognizer_loss_per_sample = torch.empty(0, device=device)
+                            clean_recognizer_loss = torch.zeros((), device=device)
+                        adv_recognizer_loss_per_sample = torch.empty(0, device=device)
                         if clean_member_outputs is None:
                             clean_loss_per_sample = F.cross_entropy(clean_logits, clean_loss_labels, reduction="none")
                             clean_loss = clean_loss_per_sample.mean()
@@ -1286,13 +1518,13 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                             for name, item in clean_member_outputs.items():
                                 member_loss_labels = item.get("loss_labels", labels)
                                 _accumulate_member_epoch_metric(
-                                    train_member_metrics_totals,
+                                    train_joint_target_member_metrics_totals,
                                     name=name,
                                     key="clean_loss",
                                     value=item["loss"],
                                 )
                                 _accumulate_member_epoch_metric(
-                                    train_member_metrics_totals,
+                                    train_joint_target_member_metrics_totals,
                                     name=name,
                                     key="clean_accuracy",
                                     value=classification_accuracy_tensor(
@@ -1314,9 +1546,11 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                         if (not bool(schedule["attacks_enabled"])) or config.clean_only or not config.enabled_attackers():
                             attack_result = None
                             adv_loss = torch.zeros((), device=device)
+                            adv_recognizer_loss = torch.zeros((), device=device)
                             consistency = torch.zeros((), device=device)
                             adv_loss_per_sample = torch.empty(0, device=device)
                             adv_member_outputs = None
+                            adv_recognizer_outputs = None
                         else:
                             requested_adv = int(round(images.size(0) * (1.0 - schedule["clean_fraction"])))
                             adv_count = min(images.size(0), max(2, requested_adv))
@@ -1336,6 +1570,7 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                                 image_size=config.image_size,
                                 target_model=train_model,
                                 surrogates=surrogates,
+                                recognizer_ensemble=active_recognizer_ensemble,
                                 device=device,
                                 attack_chunk_size=config.attack_chunk_size,
                             )
@@ -1351,6 +1586,22 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                             adv_loss_labels = adv_outputs.get("loss_labels", adv_labels)
                             adv_embeddings = adv_outputs["embeddings"]
                             adv_member_outputs = adv_outputs["member_outputs"]
+                            if active_recognizer_ensemble is not None:
+                                adv_recognizer_outputs = active_recognizer_ensemble(adv_embeddings, adv_labels)
+                                _accumulate_weight_profile(
+                                    train_recognizer_weight_profile_totals,
+                                    prefix="adv",
+                                    weights=_member_weights_from_source(active_recognizer_ensemble, adv_recognizer_outputs),
+                                )
+                                adv_recognizer_loss_per_sample = _weighted_member_loss_per_sample(
+                                    active_recognizer_ensemble,
+                                    adv_recognizer_outputs,
+                                )
+                                adv_recognizer_loss = adv_recognizer_loss_per_sample.mean()
+                            else:
+                                adv_recognizer_outputs = None
+                                adv_recognizer_loss_per_sample = torch.empty(0, device=device)
+                                adv_recognizer_loss = torch.zeros((), device=device)
                             if adv_member_outputs is None:
                                 adv_loss_per_sample = F.cross_entropy(adv_logits, adv_loss_labels, reduction="none")
                                 adv_loss = adv_loss_per_sample.mean()
@@ -1372,13 +1623,13 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                                 for name, item in adv_member_outputs.items():
                                     member_loss_labels = item.get("loss_labels", adv_labels)
                                     _accumulate_member_epoch_metric(
-                                        train_member_metrics_totals,
+                                        train_joint_target_member_metrics_totals,
                                         name=name,
                                         key="adv_loss",
                                         value=item["loss"],
                                     )
                                     _accumulate_member_epoch_metric(
-                                        train_member_metrics_totals,
+                                        train_joint_target_member_metrics_totals,
                                         name=name,
                                         key="adv_accuracy",
                                         value=classification_accuracy_tensor(
@@ -1387,11 +1638,45 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                                         ),
                                     )
                                     _accumulate_member_epoch_metric(
-                                        train_member_metrics_totals,
+                                        train_joint_target_member_metrics_totals,
                                         name=name,
                                         key="consistency",
                                         value=per_member_consistency.get(name, torch.zeros((), device=device)),
                                     )
+                        if clean_recognizer_outputs is not None:
+                            for name, item in clean_recognizer_outputs.items():
+                                _accumulate_member_epoch_metric(
+                                    train_recognizer_metrics_totals,
+                                    name=name,
+                                    key="clean_loss",
+                                    value=item["loss"],
+                                )
+                                _accumulate_member_epoch_metric(
+                                    train_recognizer_metrics_totals,
+                                    name=name,
+                                    key="clean_accuracy",
+                                    value=classification_accuracy_tensor(
+                                        item["predict_logits"].detach(),
+                                        item.get("loss_labels", labels),
+                                    ),
+                                )
+                        if adv_recognizer_outputs is not None:
+                            for name, item in adv_recognizer_outputs.items():
+                                _accumulate_member_epoch_metric(
+                                    train_recognizer_metrics_totals,
+                                    name=name,
+                                    key="adv_loss",
+                                    value=item["loss"],
+                                )
+                                _accumulate_member_epoch_metric(
+                                    train_recognizer_metrics_totals,
+                                    name=name,
+                                    key="adv_accuracy",
+                                    value=classification_accuracy_tensor(
+                                        item["predict_logits"].detach(),
+                                        item.get("loss_labels", adv_labels),
+                                    ),
+                                )
 
                         hard_loss = torch.zeros((), device=device)
                         if hard_pairs.sample_indices.numel() > 0:
@@ -1400,10 +1685,18 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                                 adv_hard_indices = hard_pairs.sample_indices[hard_pairs.sample_indices < adv_loss_per_sample.size(0)]
                                 if adv_hard_indices.numel() > 0:
                                     hard_loss = hard_loss + adv_loss_per_sample[adv_hard_indices].mean()
+                            if clean_recognizer_loss_per_sample.numel() > 0:
+                                hard_loss = hard_loss + clean_recognizer_loss_per_sample[hard_pairs.sample_indices].mean()
+                            if adv_recognizer_loss_per_sample.numel() > 0:
+                                adv_rec_indices = hard_pairs.sample_indices[hard_pairs.sample_indices < adv_recognizer_loss_per_sample.size(0)]
+                                if adv_rec_indices.numel() > 0:
+                                    hard_loss = hard_loss + adv_recognizer_loss_per_sample[adv_rec_indices].mean()
 
                         loss = (
                             config.clean_weight * clean_loss
                             + config.adv_weight * adv_loss
+                            + config.recognizer_clean_weight * clean_recognizer_loss
+                            + config.recognizer_adv_weight * adv_recognizer_loss
                             + config.consistency_weight * consistency
                             + schedule["hard_pair_weight"] * hard_loss
                         )
@@ -1449,6 +1742,10 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
 
             train_loss += loss.detach()
             train_acc += classification_accuracy_tensor(clean_predict_logits.detach(), clean_loss_labels)
+            train_clean_loss += clean_loss.detach()
+            train_adv_loss += adv_loss.detach()
+            train_recognizer_clean_loss += clean_recognizer_loss.detach()
+            train_recognizer_adv_loss += adv_recognizer_loss.detach()
             train_consistency += consistency.detach()
             train_cached_hits += torch.tensor(
                 float(0 if attack_result is None else attack_result.cached_hits),
@@ -1493,13 +1790,15 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                         min(logged_batches, batch_index),
                     )
                     postfix = {
-                        "loss": f"{float((train_loss / max(1, batches)).item()):.4f}",
+                        "L": f"{float((train_loss / max(1, batches)).item()):.2f}",
+                        "Lc": f"{float((train_clean_loss / max(1, batches)).item()):.2f}",
+                        "La": f"{float((train_adv_loss / max(1, batches)).item()):.2f}",
+                        "Lh": f"{float((train_hard_loss / max(1, batches)).item()):.2f}",
+                        "cons": f"{float((train_consistency / max(1, batches)).item()):.3f}",
                         "acc": f"{float((train_acc / max(1, batches)).item()):.4f}",
                         "stage": str(schedule.get("stage_name", "na")),
                         "atk": "on" if bool(schedule["attacks_enabled"]) else "off",
-                        "accum": f"{((batch_index - 1) % accumulation_steps) + 1}/{accumulation_steps}",
                         "img/s": f"{global_img_s:.1f}",
-                        "wait_ms": f"{avg_wait_ms:.1f}",
                         "step_ms": f"{avg_compute_ms:.1f}",
                         "step": f"{batch_index}/{total_batches}",
                     }
@@ -1551,13 +1850,19 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
 
         _reduce_mean_in_place(train_loss, distributed)
         _reduce_mean_in_place(train_acc, distributed)
+        _reduce_mean_in_place(train_clean_loss, distributed)
+        _reduce_mean_in_place(train_adv_loss, distributed)
+        _reduce_mean_in_place(train_recognizer_clean_loss, distributed)
+        _reduce_mean_in_place(train_recognizer_adv_loss, distributed)
         _reduce_mean_in_place(train_consistency, distributed)
         _reduce_mean_in_place(train_cached_hits, distributed)
         _reduce_mean_in_place(train_hard_pair_count, distributed)
         _reduce_mean_in_place(train_hard_sample_count, distributed)
         _reduce_mean_in_place(train_hard_pair_hardness, distributed)
         _reduce_mean_in_place(train_hard_loss, distributed)
-        _reduce_member_metric_totals(train_member_metrics_totals, distributed)
+        _reduce_member_metric_totals(train_joint_target_member_metrics_totals, distributed)
+        _reduce_member_metric_totals(train_recognizer_metrics_totals, distributed)
+        _reduce_member_metric_totals(train_recognizer_weight_profile_totals, distributed)
 
         run_clean_eval = _should_run_eval(epoch, config.epochs, config.clean_eval_every_epochs)
         run_robust_eval = (
@@ -1572,7 +1877,14 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
         )
         run_verification_eval = (
             config.val_pairs_path is not None
-            and _should_run_eval(epoch, config.epochs, config.verification_eval_every_epochs)
+            and (not run_robust_eval)
+            and _should_run_eval(
+                epoch,
+                config.epochs,
+                config.verification_eval_every_epochs,
+                offset=int(config.verification_eval_offset),
+                include_final=False,
+            )
         )
 
         clean_metrics = {"skipped": True}
@@ -1586,6 +1898,7 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                 _unwrap_model(model),
                 val_loader,
                 device,
+                recognizer_ensemble=active_recognizer_ensemble,
                 progress_desc=(
                     f"Val clean {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]"
                     if _is_primary()
@@ -1598,8 +1911,9 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                 model=_unwrap_model(model),
                 loader=val_loader,
                 device=device,
-                policies=config.all_attackers(),
+                policies=config.all_eval_attackers(),
                 surrogates=surrogates,
+                recognizer_ensemble=active_recognizer_ensemble,
                 image_size=config.image_size,
                 attack_chunk_size=config.attack_chunk_size,
                 progress_prefix=(
@@ -1618,6 +1932,7 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                 device=device,
                 policy=eval_policy,
                 surrogates=surrogates,
+                recognizer_ensemble=active_recognizer_ensemble,
                 image_size=config.image_size,
                 progress_desc=(
                     f"Val robust {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]"
@@ -1626,29 +1941,64 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                 ),
             )
 
-        if _is_primary() and run_verification_eval:
-            verification_metrics = evaluate_verification_pairs(
-                model=_unwrap_model(model),
-                pairs_path=Path(config.val_pairs_path).resolve(),
-                device=device,
-            )
+        if run_verification_eval:
+            val_pairs_path = Path(config.val_pairs_path).resolve()
+            if val_pairs_path.exists():
+                rank_verification_metrics = evaluate_verification_pairs(
+                    model=_unwrap_model(model),
+                    pairs_path=val_pairs_path,
+                    device=device,
+                    progress_desc=(
+                        f"Verification {epoch}/{config.epochs}"
+                        if _is_primary()
+                        else None
+                    ),
+                )
+                if _is_primary():
+                    verification_metrics = rank_verification_metrics
+            else:
+                if _is_primary():
+                    verification_metrics = {
+                        "skipped": True,
+                        "reason": "missing_pairs_file",
+                        "pairs_path": str(val_pairs_path),
+                    }
+                    logger.info(
+                        f"[INFO] Verification skipped: missing pair bundle at {val_pairs_path}"
+                    )
         if test_loader is not None and run_clean_eval:
             test_clean_metrics = evaluate_clean(
                 _unwrap_model(model),
                 test_loader,
                 device,
+                recognizer_ensemble=active_recognizer_ensemble,
                 progress_desc=(
                     f"Test clean {epoch}/{config.epochs} [{schedule.get('stage_name', 'na')}]"
                     if _is_primary()
                     else None
                 ),
             )
-        if _is_primary() and config.test_pairs_path is not None:
-            test_verification_metrics = evaluate_verification_pairs(
-                model=_unwrap_model(model),
-                pairs_path=Path(config.test_pairs_path).resolve(),
-                device=device,
-            )
+        if config.test_pairs_path is not None:
+            test_pairs_path = Path(config.test_pairs_path).resolve()
+            if test_pairs_path.exists():
+                rank_test_verification_metrics = evaluate_verification_pairs(
+                    model=_unwrap_model(model),
+                    pairs_path=test_pairs_path,
+                    device=device,
+                    progress_desc="Test verification" if _is_primary() else None,
+                )
+                if _is_primary():
+                    test_verification_metrics = rank_test_verification_metrics
+            else:
+                if _is_primary():
+                    test_verification_metrics = {
+                        "skipped": True,
+                        "reason": "missing_pairs_file",
+                        "pairs_path": str(test_pairs_path),
+                    }
+                    logger.info(
+                        f"[INFO] Test verification skipped: missing pair bundle at {test_pairs_path}"
+                    )
         _clear_device_caches(device)
         post_eval_cuda_stats = _cuda_memory_stats(device)
         if _is_primary() and device.type == "cuda":
@@ -1668,13 +2018,36 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
             "avg_clean_forward_ms": _safe_divide(clean_forward_s_total * 1000.0, float(max(1, batches))),
             "avg_hard_pair_ms": _safe_divide(hard_pair_s_total * 1000.0, float(max(1, batches))),
             "avg_attack_generation_ms": _safe_divide(attack_generation_s_total * 1000.0, float(max(1, attacked_batches))),
+            "avg_attack_generation_ms_per_attacked_sample": _safe_divide(
+                attack_generation_s_total * 1000.0,
+                float(max(1, attacked_samples)),
+            ),
             "avg_adv_forward_ms": _safe_divide(adv_forward_s_total * 1000.0, float(max(1, attacked_batches))),
             "avg_backward_ms": _safe_divide(backward_s_total * 1000.0, float(max(1, batches))),
             "avg_optimizer_ms": _safe_divide(optimizer_s_total * 1000.0, float(max(1, optimizer_steps))),
+            "train_compute_s": float(epoch_compute_s),
+            "train_data_wait_s": float(epoch_data_wait_s),
+            "attack_generation_s": float(attack_generation_s_total),
+            "clean_forward_s": float(clean_forward_s_total),
+            "hard_pair_s": float(hard_pair_s_total),
+            "adv_forward_s": float(adv_forward_s_total),
+            "backward_s": float(backward_s_total),
+            "optimizer_s": float(optimizer_s_total),
+            "data_wait_wall_share": _safe_divide(epoch_data_wait_s, epoch_wall_s),
+            "attack_generation_compute_share": _safe_divide(attack_generation_s_total, epoch_compute_s),
+            "clean_forward_compute_share": _safe_divide(clean_forward_s_total, epoch_compute_s),
+            "hard_pair_compute_share": _safe_divide(hard_pair_s_total, epoch_compute_s),
+            "adv_forward_compute_share": _safe_divide(adv_forward_s_total, epoch_compute_s),
+            "backward_compute_share": _safe_divide(backward_s_total, epoch_compute_s),
+            "optimizer_compute_share": _safe_divide(optimizer_s_total, epoch_compute_s),
             "attacked_batches": float(attacked_batches),
             "attacked_samples": float(attacked_samples),
             "attack_share_of_batches": _safe_divide(float(attacked_batches), float(max(1, batches))),
             "attack_policy_counts": {name: int(count) for name, count in sorted(attack_policy_counts.items())},
+            "attack_policy_fractions": {
+                name: float(count) / float(max(1, attacked_batches))
+                for name, count in sorted(attack_policy_counts.items())
+            },
         }
         memory = {
             "post_train_cuda": post_train_cuda_stats,
@@ -1683,6 +2056,26 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
             "cuda_reserved_peak_mb": post_eval_cuda_stats.get("max_reserved_mb", post_train_cuda_stats.get("max_reserved_mb", 0.0)),
         }
 
+        train_joint_target_member_metrics = _finalize_member_epoch_metrics(train_joint_target_member_metrics_totals)
+        train_recognizer_metrics = _finalize_member_epoch_metrics(train_recognizer_metrics_totals)
+        train_recognizer_weight_profile = _finalize_member_epoch_metrics(train_recognizer_weight_profile_totals)
+        avg_train_loss = float((train_loss / max(1, batches)).item())
+        avg_clean_loss = float((train_clean_loss / max(1, batches)).item())
+        avg_adv_loss = float((train_adv_loss / max(1, batches)).item())
+        avg_recognizer_clean_loss = float((train_recognizer_clean_loss / max(1, batches)).item())
+        avg_recognizer_adv_loss = float((train_recognizer_adv_loss / max(1, batches)).item())
+        avg_consistency = float((train_consistency / max(1, batches)).item())
+        avg_hard_loss = float((train_hard_loss / max(1, batches)).item())
+        weighted_loss_components = {
+            "clean": float(config.clean_weight) * avg_clean_loss,
+            "adv": float(config.adv_weight) * avg_adv_loss,
+            "recognizer_clean": float(config.recognizer_clean_weight) * avg_recognizer_clean_loss,
+            "recognizer_adv": float(config.recognizer_adv_weight) * avg_recognizer_adv_loss,
+            "consistency": float(config.consistency_weight) * avg_consistency,
+            "hard_pair": float(schedule["hard_pair_weight"]) * avg_hard_loss,
+        }
+        weighted_loss_components["sum"] = float(sum(weighted_loss_components.values()))
+        weighted_loss_components["residual"] = avg_train_loss - weighted_loss_components["sum"]
         epoch_record = {
             "epoch": epoch,
             "lr": optimizer.param_groups[0]["lr"],
@@ -1692,20 +2085,34 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
             "reference_batch_size": int(config.reference_batch_size or config.batch_size),
             "epoch_batch_size": int(epoch_batch_size),
             "effective_global_batch_size": int(_effective_global_batch_size_from_batch(config, epoch_batch_size)),
-            "train_loss": float((train_loss / max(1, batches)).item()),
+            "train_loss": avg_train_loss,
             "train_accuracy": float((train_acc / max(1, batches)).item()),
-            "train_consistency": float((train_consistency / max(1, batches)).item()),
+            "train_clean_loss": avg_clean_loss,
+            "train_adv_loss": avg_adv_loss,
+            "train_recognizer_clean_loss": avg_recognizer_clean_loss,
+            "train_recognizer_adv_loss": avg_recognizer_adv_loss,
+            "train_consistency": avg_consistency,
             "train_cached_hits": float((train_cached_hits / max(1, batches)).item()),
             "train_hard_pair_count": float((train_hard_pair_count / max(1, batches)).item()),
             "train_hard_sample_count": float((train_hard_sample_count / max(1, batches)).item()),
             "train_hard_pair_hardness": float((train_hard_pair_hardness / max(1, batches)).item()),
-            "train_hard_loss": float((train_hard_loss / max(1, batches)).item()),
+            "train_hard_loss": avg_hard_loss,
+            "train_weighted_loss_components": weighted_loss_components,
             "curriculum_progress": schedule["progress"],
             "training_stage": schedule.get("stage_name", "unknown"),
             "epoch_clean_fraction": schedule["clean_fraction"],
             "epoch_hard_pair_fraction": schedule["hard_pair_fraction"],
             "epoch_hard_pair_weight": schedule["hard_pair_weight"],
-            "train_member_metrics": _finalize_member_epoch_metrics(train_member_metrics_totals),
+            "recognizer_ensemble_trainable": bool(_parameter_count(recognizer_ensemble) > 0),
+            "recognizer_ensemble_param_count": int(_parameter_count(recognizer_ensemble)),
+            "train_joint_target_member_metrics": train_joint_target_member_metrics,
+            "train_recognizer_metrics": train_recognizer_metrics,
+            "train_recognizer_weight_profile": train_recognizer_weight_profile,
+            "train_member_metrics": _merge_metric_groups(
+                train_joint_target_member_metrics,
+                {f"rec::{name}": metrics for name, metrics in train_recognizer_metrics.items()},
+                {f"recw::{name}": metrics for name, metrics in train_recognizer_weight_profile.items()},
+            ),
             "val_clean": clean_metrics,
             "val_robust": robust_metrics,
             "val_robust_by_attack": robust_by_attack,
@@ -1724,15 +2131,34 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                 f" {epoch}/{config.epochs}"
                 f" stage={epoch_record['training_stage']}"
                 f" lr={epoch_record['lr']:.5f}"
-                f" train_loss={epoch_record['train_loss']:.4f}"
-                f" train_acc={epoch_record['train_accuracy']:.4f}"
-                f" hard_pairs={epoch_record['train_hard_pair_count']:.2f}"
-                f" val_clean_loss={clean_metrics.get('loss', float('nan')):.4f}"
-                f" val_clean_acc={clean_metrics.get('accuracy', float('nan')):.4f}"
-                f" val_robust_loss={robust_metrics.get('loss', float('nan')):.4f}"
-                f" val_robust_acc={robust_metrics.get('accuracy', float('nan')):.4f}"
+                f" L={epoch_record['train_loss']:.3f}"
+                f" Lc={epoch_record['train_clean_loss']:.3f}"
+                f" La={epoch_record['train_adv_loss']:.3f}"
+                f" Lrc={epoch_record['train_recognizer_clean_loss']:.3f}"
+                f" Lra={epoch_record['train_recognizer_adv_loss']:.3f}"
+                f" Lh={epoch_record['train_hard_loss']:.3f}"
+                f" cons={epoch_record['train_consistency']:.4f}"
+                f" acc={epoch_record['train_accuracy']:.4f}"
+                f" vclean={clean_metrics.get('loss', float('nan')):.3f}/{clean_metrics.get('accuracy', float('nan')):.4f}"
+                f" vrob={robust_metrics.get('loss', float('nan')):.3f}/{robust_metrics.get('accuracy', float('nan')):.4f}"
+                f" img_s={performance.get('global_img_s', 0.0):.0f}"
+                f" atk_ms={performance.get('avg_attack_generation_ms', 0.0):.1f}"
+                f" mem={memory.get('cuda_peak_mb', 0.0):.0f}MB"
             )
-            if epoch_record["train_member_metrics"]:
+            weighted_components = epoch_record["train_weighted_loss_components"]
+            logger.info(
+                "[LOSS-COMP]"
+                f" epoch={epoch}/{config.epochs}"
+                f" clean={weighted_components.get('clean', 0.0):.3f}"
+                f" adv={weighted_components.get('adv', 0.0):.3f}"
+                f" rec_clean={weighted_components.get('recognizer_clean', 0.0):.3f}"
+                f" rec_adv={weighted_components.get('recognizer_adv', 0.0):.3f}"
+                f" cons={weighted_components.get('consistency', 0.0):.3f}"
+                f" hard={weighted_components.get('hard_pair', 0.0):.3f}"
+                f" sum={weighted_components.get('sum', 0.0):.3f}"
+                f" residual={weighted_components.get('residual', 0.0):.5f}"
+            )
+            if epoch_record["train_joint_target_member_metrics"]:
                 compact = " ".join(
                     (
                         f"{name}:"
@@ -1741,21 +2167,245 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
                         f",adv={metrics.get('adv_loss', 0.0):.3f}/"
                         f"{metrics.get('adv_accuracy', 0.0):.3f}"
                     )
-                    for name, metrics in epoch_record["train_member_metrics"].items()
+                    for name, metrics in epoch_record["train_joint_target_member_metrics"].items()
                 )
-                logger.info(f"[MEMBERS] epoch={epoch}/{config.epochs} {compact}")
+                logger.info(f"[TARGET-MEMBERS] epoch={epoch}/{config.epochs} {compact}")
+            if epoch_record["train_recognizer_metrics"]:
+                compact = " ".join(
+                    (
+                        f"{name}:"
+                        f"clean={metrics.get('clean_loss', 0.0):.3f}/"
+                        f"{metrics.get('clean_accuracy', 0.0):.3f}"
+                        f",adv={metrics.get('adv_loss', 0.0):.3f}/"
+                        f"{metrics.get('adv_accuracy', 0.0):.3f}"
+                    )
+                    for name, metrics in epoch_record["train_recognizer_metrics"].items()
+                )
+                logger.info(f"[RECOGNIZERS] epoch={epoch}/{config.epochs} {compact}")
+            if epoch_record["train_recognizer_weight_profile"]:
+                compact = " ".join(
+                    f"{name}:{metrics.get('weight', 0.0):.3f}"
+                    for name, metrics in epoch_record["train_recognizer_weight_profile"].items()
+                )
+                logger.info(f"[REC-WEIGHTS] epoch={epoch}/{config.epochs} {compact}")
 
             if config.checkpoint_every > 0 and epoch % config.checkpoint_every == 0:
-                checkpoint_path = _save_checkpoint(output_dir, epoch, model, optimizer, scheduler, scaler, history)
+                checkpoint_path = _save_checkpoint(
+                    output_dir,
+                    epoch,
+                    model,
+                    optimizer,
+                    scheduler,
+                    scaler,
+                    history,
+                    recognizer_ensemble=recognizer_ensemble,
+                    training_signature=training_signature,
+                )
                 logger.info(f"[INFO] Saved checkpoint: {checkpoint_path}")
+
+    if history and config.val_pairs_path is not None:
+        latest_record = history[-1]
+        latest_verification = latest_record.get("val_verification")
+        needs_final_verification = not (
+            isinstance(latest_verification, dict)
+            and not latest_verification.get("skipped")
+        )
+        if needs_final_verification:
+            val_pairs_path = Path(config.val_pairs_path).resolve()
+            final_epoch = int(latest_record.get("epoch", config.epochs))
+            if val_pairs_path.exists():
+                if _is_primary():
+                    logger.info(
+                        "[INFO] Running final verification backfill "
+                        f"for epoch {final_epoch}/{config.epochs}: {val_pairs_path}"
+                    )
+                rank_final_verification_metrics = evaluate_verification_pairs(
+                    model=_unwrap_model(model),
+                    pairs_path=val_pairs_path,
+                    device=device,
+                    progress_desc=(
+                        f"Final verification {final_epoch}/{config.epochs}"
+                        if _is_primary()
+                        else None
+                    ),
+                )
+                if _is_primary():
+                    latest_record["val_verification"] = rank_final_verification_metrics
+                    latest_record["val_verification_backfilled"] = True
+                    latest_record["val_verification_backfill_reason"] = (
+                        "final_epoch_overlapped_robust_eval_or_cadence_skip"
+                    )
+                    _write_history(output_dir, history)
+                    with (output_dir / "posthoc-verification.json").open("w", encoding="utf-8") as handle:
+                        json.dump(
+                            {
+                                "epoch": final_epoch,
+                                "reason": latest_record["val_verification_backfill_reason"],
+                                "result": rank_final_verification_metrics,
+                                "stages": {
+                                    "verification": {
+                                        "ok": True,
+                                        "backfilled": True,
+                                        "result": rank_final_verification_metrics,
+                                    }
+                                },
+                            },
+                            handle,
+                            indent=2,
+                            sort_keys=True,
+                        )
+                        handle.write("\n")
+                    checkpoint_path = _save_checkpoint(
+                        output_dir,
+                        final_epoch,
+                        model,
+                        optimizer,
+                        scheduler,
+                        scaler,
+                        history,
+                        recognizer_ensemble=recognizer_ensemble,
+                        training_signature=training_signature,
+                    )
+                    logger.info(
+                        "[INFO] Final verification backfill complete; "
+                        f"updated history, posthoc-verification.json, and {checkpoint_path}"
+                    )
+            elif _is_primary():
+                latest_record["val_verification"] = {
+                    "skipped": True,
+                    "reason": "missing_pairs_file",
+                    "pairs_path": str(val_pairs_path),
+                }
+                latest_record["val_verification_backfilled"] = False
+                _write_history(output_dir, history)
+                logger.info(
+                    f"[INFO] Final verification backfill skipped: missing pair bundle at {val_pairs_path}"
+                )
+            if distributed and dist.is_initialized():
+                dist.barrier()
+
+    if history:
+        latest_record = history[-1]
+        final_eval_attackers = config.enabled_eval_attackers()
+        expected_robust_attack_names = {policy.name for policy in final_eval_attackers if policy.enabled}
+        latest_by_attack = latest_record.get("val_robust_by_attack")
+        completed_robust_attack_names = (
+            set(latest_by_attack)
+            if isinstance(latest_by_attack, dict)
+            else set()
+        )
+        latest_robust = latest_record.get("val_robust")
+        needs_final_robust = not (
+            isinstance(latest_robust, dict)
+            and not latest_robust.get("skipped")
+        )
+        if expected_robust_attack_names and not expected_robust_attack_names.issubset(completed_robust_attack_names):
+            needs_final_robust = True
+        if needs_final_robust and final_eval_attackers:
+            final_epoch = int(latest_record.get("epoch", config.epochs))
+            if _is_primary():
+                missing_robust = sorted(expected_robust_attack_names - completed_robust_attack_names)
+                logger.info(
+                    "[INFO] Running final robust backfill "
+                    f"for epoch {final_epoch}/{config.epochs}: {_policy_names(final_eval_attackers)}"
+                    + (f" missing={missing_robust}" if missing_robust else "")
+                )
+            if config.evaluate_all_attacks or len(final_eval_attackers) > 1:
+                final_robust_eval = evaluate_robust_all(
+                    model=_unwrap_model(model),
+                    loader=val_loader,
+                    device=device,
+                    policies=final_eval_attackers,
+                    surrogates=surrogates,
+                    recognizer_ensemble=active_recognizer_ensemble,
+                    image_size=config.image_size,
+                    attack_chunk_size=config.attack_chunk_size,
+                    progress_prefix=(
+                        f"Final robust {final_epoch}/{config.epochs}"
+                        if _is_primary()
+                        else None
+                    ),
+                    distributed=distributed,
+                )
+                final_robust_metrics = final_robust_eval["average"]
+                final_robust_by_attack = final_robust_eval["by_attack"]
+            else:
+                final_policy = eval_policy or final_eval_attackers[0]
+                final_robust_metrics = evaluate_robust(
+                    model=_unwrap_model(model),
+                    loader=val_loader,
+                    device=device,
+                    policy=final_policy,
+                    surrogates=surrogates,
+                    recognizer_ensemble=active_recognizer_ensemble,
+                    image_size=config.image_size,
+                    attack_chunk_size=config.attack_chunk_size,
+                    progress_desc=(
+                        f"Final robust {final_epoch}/{config.epochs}"
+                        if _is_primary()
+                        else None
+                    ),
+                )
+                final_robust_by_attack = {final_policy.name: final_robust_metrics}
+            if _is_primary():
+                latest_record["val_robust"] = final_robust_metrics
+                latest_record["val_robust_by_attack"] = final_robust_by_attack
+                latest_record["val_robust_backfilled"] = True
+                latest_record["val_robust_backfill_reason"] = (
+                    "final_epoch_eval_attackers_absent_or_incomplete"
+                )
+                _write_history(output_dir, history)
+                with (output_dir / "posthoc-robust.json").open("w", encoding="utf-8") as handle:
+                    json.dump(
+                        {
+                            "epoch": final_epoch,
+                            "reason": latest_record["val_robust_backfill_reason"],
+                            "result": final_robust_metrics,
+                            "by_attack": final_robust_by_attack,
+                            "stages": {
+                                "robust": {
+                                    "ok": True,
+                                    "backfilled": True,
+                                    "result": {
+                                        "average": final_robust_metrics,
+                                        "by_attack": final_robust_by_attack,
+                                    },
+                                }
+                            },
+                        },
+                        handle,
+                        indent=2,
+                        sort_keys=True,
+                    )
+                    handle.write("\n")
+                checkpoint_path = _save_checkpoint(
+                    output_dir,
+                    final_epoch,
+                    model,
+                    optimizer,
+                    scheduler,
+                    scaler,
+                    history,
+                    recognizer_ensemble=recognizer_ensemble,
+                    training_signature=training_signature,
+                )
+                logger.info(
+                    "[INFO] Final robust backfill complete; "
+                    f"updated history, posthoc-robust.json, and {checkpoint_path}"
+                )
+            if distributed and dist.is_initialized():
+                dist.barrier()
 
     final_summary = {
         "output_dir": str(output_dir),
         "epochs": config.epochs,
         "history": history,
-        "metrics_schema_version": 2,
+        "metrics_schema_version": 4,
         "runtime_profile": config.normalized_runtime_profile(),
         "device": _device_summary(device),
+        "training_signature": training_signature,
+        "recognizer_ensemble_trainable": bool(_parameter_count(recognizer_ensemble) > 0),
+        "recognizer_ensemble_param_count": int(_parameter_count(recognizer_ensemble)),
         "distributed": {
             "enabled": bool(distributed),
             "world_size": int(_world_size()),
@@ -1780,6 +2430,14 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
             "val_clean_accuracy": _best_history_value(history, lambda item: (item.get("val_clean") or {}).get("accuracy")),
             "val_robust_accuracy": _best_history_value(history, lambda item: (item.get("val_robust") or {}).get("accuracy")),
             "val_verification_auc": _best_history_value(history, lambda item: (item.get("val_verification") or {}).get("roc_auc")),
+            "val_verification_eer": _lowest_history_value(history, lambda item: (item.get("val_verification") or {}).get("eer")),
+            "val_verification_tar_far_1e_4": _best_history_value(history, lambda item: (item.get("val_verification") or {}).get("tar@far=0.0001")),
+            "val_verification_tar_far_1e_5": _best_history_value(history, lambda item: (item.get("val_verification") or {}).get("tar@far=1e-05")),
+            "val_robust_attack_success_rate": _lowest_history_value(history, lambda item: (item.get("val_robust") or {}).get("attack_success_rate")),
+            "val_clean_ensemble_gain_vs_best_single": _best_history_value(history, lambda item: ((item.get("val_clean") or {}).get("ensemble") or {}).get("gain_vs_best_single")),
+            "val_robust_ensemble_gain_vs_best_single": _best_history_value(history, lambda item: ((item.get("val_robust") or {}).get("ensemble") or {}).get("gain_vs_best_single")),
+            "val_clean_recognizer_ensemble_gain_vs_best_single": _best_history_value(history, lambda item: ((item.get("val_clean") or {}).get("recognizer_ensemble") or {}).get("gain_vs_best_single")),
+            "val_robust_recognizer_ensemble_gain_vs_best_single": _best_history_value(history, lambda item: ((item.get("val_robust") or {}).get("recognizer_ensemble") or {}).get("gain_vs_best_single")),
             "throughput_global_img_s": _best_history_value(history, lambda item: (item.get("performance") or {}).get("global_img_s")),
         },
     }

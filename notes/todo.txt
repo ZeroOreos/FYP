@@ -73,7 +73,7 @@ Interpretation rule
 - `[NOT DONE]` freeze the ablation plan before large runs
 - `[DONE]` choose the productive ensemble logic: defended recognizer pool, transfer-oriented attack pool, hard mining, and cross-recognizer transfer evaluation
 - `[NOT DONE]` validate the joint defended pool thoroughly enough to replace the older single-defended-recognizer framing everywhere
-- `[IN PROGRESS]` update the wording of the claim around the joint defended recognizer pool
+- `[IN PROGRESS]` update the wording of the claim around a moderately strong multi-recognizer, multi-attack ensemble
 
 6. Verification path
 - `[DONE]` build a tiny verification run
@@ -95,8 +95,8 @@ Interpretation rule
 - `[NOT DONE]` run the clean baseline at serious `WebFace4M` scale
 - `[NOT DONE]` run the strongest single-attack condition
 - `[NOT DONE]` run the fixed primary-attacker-set condition
-- `[NOT DONE]` run the primary-plus-periodic-surrogate attacker condition
-- `[IN PROGRESS]` run the full three-recognizer joint-pool condition under the final attacker design
+- `[NOT DONE]` run the primary-plus-periodic-surrogate attacker condition if compute remains justified after the main ladder
+- `[IN PROGRESS]` run the full multi-recognizer, multi-attack condition under the final attacker design
 - `[NOT DONE]` test curriculum as a real experiment
 - `[NOT DONE]` compare `ArcFace`, `CosFace`, and `CurricularFace` clean and robust behavior under one fixed training contract
 - `[IN PROGRESS]` start the serious `WebFace4M` `ArcFace` `iResNet100` run after the full local shard pull finishes
@@ -129,4 +129,24 @@ Interpretation rule
 - `[NOT DONE]` test whether OOD robustness and adversarial robustness move together or trade off
 - `[NOT DONE]` test whether physical or semantic extensions add non-redundant value
 - `[NOT DONE]` test whether clean degradation stays acceptable and explicit
+- `[NOT DONE]` confirm that the strongest gaps appear on robustness and transfer metrics rather than expecting the broadest ensemble to dominate clean accuracy
 - `[NOT DONE]` narrow or reframe the claim if the evidence does not support it
+
+11. Paper repo cleanup before writing
+- `[NOT DONE]` do a full repo cleanup pass after final posthoc evaluation is pulled.
+- `[NOT DONE]` integrate every paper-critical fix into source, not just ad hoc probe commands.
+- `[NOT DONE]` verify that posthoc robust, posthoc verification, paper breakdown, config rendering, checkpoint loading, and class-mapping reconstruction all use the same configured `WebFace4M` subset contract.
+- `[NOT DONE]` explicitly check that posthoc robust loads `margin.weight` and does not silently run with a random classifier head.
+- `[NOT DONE]` preserve the exact `subset_cache_fraction-1_seed-42_min-2.json` class order used by the `205849`-class paper checkpoints.
+- `[NOT DONE]` make configs portable across local Mac paths and SSH paths through environment-variable remapping, and remove hardcoded local-only paths where possible.
+- `[NOT DONE]` remove or quarantine irrelevant legacy `joint_pool`, old smoke, old shard, and wrong-metric artifacts that are not part of the paper ladder.
+- `[NOT DONE]` keep only the final ladder configs, reproducibility snapshots, run summaries, posthoc outputs, and scripts needed to reproduce the paper tables.
+- `[NOT DONE]` make documentation blunt and complete: state what each condition trains on, what each condition evaluates on, and which metrics are safe to quote.
+- `[NOT DONE]` document all relevant ensemble members: target `ArcFace/iResNet100`, recognizer ensemble `ArcFace/CosFace/CurricularFace`, attacker suite `PGD/BPFA/DFANet`, and future stress attackers as future work only.
+- `[NOT DONE]` update `README.md`, `notes/application.txt`, `notes/constructor.txt`, and paper-table notes so they agree on terminology and do not use misleading older framing.
+- `[NOT DONE]` place references in one clear paper-facing section, with no fake coverage for unimplemented modern stress attacks.
+- `[NOT DONE]` rebuild or validate the final metrics table from machine-readable artifacts rather than hand-copied terminal snippets.
+- `[NOT DONE]` mark stale skipped posthoc files, partial-checkpoint outputs, and old max-is-best summary fields as unsafe for paper tables.
+- `[NOT DONE]` keep posthoc repair details out of the final paper prose once fixed; document them in the public repo reproducibility notes instead.
+- `[NOT DONE]` run a final `rg` audit for `joint-main`, `joint_pool`, old `WebFace42M` placeholders, `CelebA`, local absolute paths, and obsolete config names before freezing the repo.
+- `[NOT DONE]` make the directory structure presentable: paper configs in one place, paper runs in one place, notes cleanly separated from downstream report drafts, and helper scripts named by purpose.

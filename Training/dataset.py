@@ -532,6 +532,40 @@ def build_class_to_idx(
     return {name: idx for idx, name in enumerate(classes)}
 
 
+def build_configured_class_to_idx(
+    train_dir: Path,
+    val_dir: Path | None = None,
+    *,
+    dataset_fraction: float = 1.0,
+    dataset_subset_seed: int = 42,
+    dataset_min_images_per_identity: int = 2,
+) -> dict[str, int]:
+    """Rebuild the exact class mapping used by build_dataloaders."""
+    cache_path = _subset_plan_cache_path(
+        train_dir,
+        fraction=dataset_fraction,
+        subset_seed=dataset_subset_seed,
+        min_images_per_identity=dataset_min_images_per_identity,
+    )
+    train_subset_plan = _load_subset_plan_cache(cache_path)
+    if train_subset_plan is None:
+        train_grouped = _collect_label_rel_paths(train_dir)
+        subset_source = train_grouped
+        if val_dir is not None:
+            val_grouped = _collect_label_rel_paths(val_dir)
+            overlap_labels = set(train_grouped) & set(val_grouped)
+            if overlap_labels:
+                subset_source = {label: train_grouped[label] for label in sorted(overlap_labels)}
+        train_subset_plan = _make_subset_plan(
+            subset_source,
+            fraction=dataset_fraction,
+            subset_seed=dataset_subset_seed,
+            min_images_per_identity=dataset_min_images_per_identity,
+        )
+        _save_subset_plan_cache(cache_path, train_subset_plan)
+    return build_class_to_idx(train_dir, subset_plan=train_subset_plan)
+
+
 def _build_dataset(
     data_path: Path,
     class_to_idx: dict[str, int],

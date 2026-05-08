@@ -94,13 +94,53 @@ def _autocast_disabled(device: torch.device):
     return contextlib.nullcontext()
 
 
+@contextlib.contextmanager
+def _parameter_grads_disabled(*objects):
+    params: list[torch.nn.Parameter] = []
+    seen: set[int] = set()
+    for obj in objects:
+        if obj is None:
+            continue
+        if isinstance(obj, dict):
+            iterable = obj.values()
+        else:
+            iterable = (obj,)
+        for item in iterable:
+            module = getattr(item, "module", item)
+            if not isinstance(module, torch.nn.Module):
+                continue
+            for param in module.parameters():
+                param_id = id(param)
+                if param_id in seen:
+                    continue
+                seen.add(param_id)
+                params.append(param)
+    previous = [param.requires_grad for param in params]
+    try:
+        for param in params:
+            param.requires_grad_(False)
+        yield
+    finally:
+        for param, requires_grad in zip(params, previous):
+            param.requires_grad_(requires_grad)
+
+
+def _unwrap_target_model(target_model: TrainableRecognizer):
+    return getattr(target_model, "module", target_model)
+
+
+def _unwrap_recognizer_ensemble(recognizer_ensemble: object | None):
+    return getattr(recognizer_ensemble, "module", recognizer_ensemble)
+
+
 def _target_training_outputs(
     target_model: TrainableRecognizer,
     images: torch.Tensor,
     labels: torch.Tensor,
 ) -> dict[str, torch.Tensor | dict[str, dict[str, torch.Tensor]]]:
-    if hasattr(target_model, "forward_attack_outputs"):
-        outputs = target_model.forward_attack_outputs(images, labels)
+    eval_target = _unwrap_target_model(target_model)
+    if hasattr(eval_target, "forward_attack_outputs"):
+        outputs = eval_target.forward_attack_outputs(images, labels)
     else:
         outputs = target_model(images, labels)
     if not isinstance(outputs, dict):
@@ -116,6 +156,7 @@ def _surrogate_embedding_loss(
     target_model: TrainableRecognizer,
     labels: torch.Tensor,
     surrogates: dict[str, SurrogateWrapper],
+    recognizer_ensemble: object | None = None,
     cache: AttackCache | None = None,
     target_outputs: dict[str, torch.Tensor | dict[str, dict[str, torch.Tensor]]] | None = None,
 ) -> torch.Tensor:
@@ -133,6 +174,30 @@ def _surrogate_embedding_loss(
             logits = resolved_outputs["logits"]
             loss_labels = resolved_outputs.get("loss_labels", labels)
             total = total + float(weight) * F.cross_entropy(logits, loss_labels)
+            weight_sum += float(weight)
+            continue
+        if name == "recognizers":
+            if recognizer_ensemble is None:
+                continue
+            eval_recognizer_ensemble = _unwrap_recognizer_ensemble(recognizer_ensemble)
+            if eval_recognizer_ensemble is None:
+                continue
+            resolved_outputs = target_outputs
+            if resolved_outputs is None:
+                resolved_outputs = _target_training_outputs(target_model, adv_images, labels)
+            recognizer_outputs = eval_recognizer_ensemble.forward_from_embeddings(
+                resolved_outputs["embeddings"],
+                labels,
+            )
+            if not recognizer_outputs:
+                continue
+            rec_loss = torch.stack(
+                [
+                    eval_recognizer_ensemble.member_weights[member_name] * item["loss"]
+                    for member_name, item in recognizer_outputs.items()
+                ]
+            ).sum()
+            total = total + float(weight) * rec_loss
             weight_sum += float(weight)
             continue
 
@@ -261,8 +326,10 @@ def _bpfa_loss(
     target_model: TrainableRecognizer,
     labels: torch.Tensor,
     surrogates: dict[str, SurrogateWrapper],
+    recognizer_ensemble: object | None = None,
     cache: AttackCache | None = None,
 ) -> torch.Tensor:
+    eval_target = _unwrap_target_model(target_model)
     base_adv_outputs = _target_training_outputs(target_model, adv_images, labels)
     ce_loss = _surrogate_embedding_loss(
         policy=policy,
@@ -271,6 +338,7 @@ def _bpfa_loss(
         target_model=target_model,
         labels=labels,
         surrogates=surrogates,
+        recognizer_ensemble=recognizer_ensemble,
         cache=cache,
         target_outputs=base_adv_outputs,
     )
@@ -290,7 +358,7 @@ def _bpfa_loss(
         clean_view_embeddings = []
         with torch.no_grad():
             for clean_view in augmented_clean:
-                clean_view_embeddings.append(target_model.forward_embeddings(clean_view).detach())
+                clean_view_embeddings.append(eval_target.forward_embeddings(clean_view).detach())
         if cache is not None:
             cache.bpfa_clean_view_embeddings = clean_view_embeddings
 
@@ -317,6 +385,7 @@ def _restart_objective_score(
     target_model: TrainableRecognizer,
     labels: torch.Tensor,
     surrogates: dict[str, SurrogateWrapper],
+    recognizer_ensemble: object | None,
     cache: AttackCache | None,
     objective: str,
 ) -> torch.Tensor:
@@ -328,6 +397,7 @@ def _restart_objective_score(
             target_model=target_model,
             labels=labels,
             surrogates=surrogates,
+            recognizer_ensemble=recognizer_ensemble,
             cache=cache,
         )
     if objective == "pgd":
@@ -338,6 +408,7 @@ def _restart_objective_score(
             target_model=target_model,
             labels=labels,
             surrogates=surrogates,
+            recognizer_ensemble=recognizer_ensemble,
             cache=cache,
         )
     if objective == "dfanet":
@@ -363,8 +434,10 @@ def _dfanet_loss(
     target_model: TrainableRecognizer,
     labels: torch.Tensor,
     surrogates: dict[str, SurrogateWrapper],
+    recognizer_ensemble: object | None = None,
     cache: AttackCache | None = None,
 ) -> torch.Tensor:
+    eval_target = _unwrap_target_model(target_model)
     outputs = _target_training_outputs(target_model, adv_images, labels)
     logits = outputs["logits"]
     adv_loss_labels = outputs.get("loss_labels", labels)
@@ -373,7 +446,7 @@ def _dfanet_loss(
         clean_embeddings = cache.clean_target_embeddings
     else:
         with torch.no_grad():
-            clean_embeddings = target_model.forward_embeddings(clean_images).detach()
+            clean_embeddings = eval_target.forward_embeddings(clean_images).detach()
         if cache is not None:
             cache.clean_target_embeddings = clean_embeddings
 
@@ -392,6 +465,7 @@ def _dfanet_loss(
         target_model=target_model,
         labels=labels,
         surrogates=surrogates,
+        recognizer_ensemble=recognizer_ensemble,
         cache=cache,
         target_outputs=outputs,
     )
@@ -405,6 +479,7 @@ def _pgd_like_attack(
     labels: torch.Tensor,
     target_model: TrainableRecognizer,
     surrogates: dict[str, SurrogateWrapper],
+    recognizer_ensemble: object | None,
     objective: str,
 ) -> torch.Tensor:
     clean_images = images.detach()
@@ -412,7 +487,11 @@ def _pgd_like_attack(
     best_loss = None
     cache = AttackCache()
 
-    with _autocast_disabled(clean_images.device):
+    with _autocast_disabled(clean_images.device), _parameter_grads_disabled(
+        target_model,
+        recognizer_ensemble,
+        surrogates,
+    ):
         attack_clean_images = clean_images.float()
         attack_labels = labels
         for restart_index in range(max(1, policy.restarts)):
@@ -432,6 +511,7 @@ def _pgd_like_attack(
                         target_model=target_model,
                         labels=attack_labels,
                         surrogates=surrogates,
+                        recognizer_ensemble=recognizer_ensemble,
                         cache=cache,
                     )
                 elif objective == "bpfa":
@@ -442,6 +522,7 @@ def _pgd_like_attack(
                         target_model=target_model,
                         labels=attack_labels,
                         surrogates=surrogates,
+                        recognizer_ensemble=recognizer_ensemble,
                         cache=cache,
                     )
                 elif objective == "dfanet":
@@ -452,6 +533,7 @@ def _pgd_like_attack(
                         target_model=target_model,
                         labels=attack_labels,
                         surrogates=surrogates,
+                        recognizer_ensemble=recognizer_ensemble,
                         cache=cache,
                     )
                 elif objective == "cw":
@@ -471,6 +553,7 @@ def _pgd_like_attack(
                     target_model=target_model,
                     labels=attack_labels,
                     surrogates=surrogates,
+                    recognizer_ensemble=recognizer_ensemble,
                     cache=cache,
                     objective=objective,
                 )
@@ -493,6 +576,7 @@ def generate_attack_batch(
     image_size: int,
     target_model: TrainableRecognizer,
     surrogates: dict[str, SurrogateWrapper],
+    recognizer_ensemble: object | None,
     device: torch.device,
     attack_chunk_size: int | None = None,
 ) -> AttackResult:
@@ -528,6 +612,7 @@ def generate_attack_batch(
                 image_size=image_size,
                 target_model=target_model,
                 surrogates=surrogates,
+                recognizer_ensemble=recognizer_ensemble,
                 device=device,
                 attack_chunk_size=None,
             )
@@ -542,33 +627,36 @@ def generate_attack_batch(
         )
 
     policy_name = policy.name.lower()
-    if policy_name == "pgd":
+    if policy_name == "pgd" or policy_name.startswith("pgd_"):
         adv = _pgd_like_attack(
             policy=policy,
             images=images,
             labels=labels,
             target_model=target_model,
             surrogates=surrogates,
+            recognizer_ensemble=recognizer_ensemble,
             objective="pgd",
         )
         return AttackResult(images=adv, policy_name=policy.name, family=policy.family)
-    if policy_name in {"bpfa", "cw"}:
+    if policy_name in {"bpfa", "cw"} or policy_name.startswith("bpfa_") or policy_name.startswith("cw_"):
         adv = _pgd_like_attack(
             policy=policy,
             images=images,
             labels=labels,
             target_model=target_model,
             surrogates=surrogates,
+            recognizer_ensemble=recognizer_ensemble,
             objective="bpfa" if policy_name == "bpfa" else "cw",
         )
         return AttackResult(images=adv, policy_name=policy.name, family=policy.family)
-    if policy_name in {"dfanet", "feature_space"}:
+    if policy_name in {"dfanet", "feature_space"} or policy_name.startswith("dfanet_"):
         adv = _pgd_like_attack(
             policy=policy,
             images=images,
             labels=labels,
             target_model=target_model,
             surrogates=surrogates,
+            recognizer_ensemble=recognizer_ensemble,
             objective="dfanet",
         )
         return AttackResult(images=adv, policy_name=policy.name, family=policy.family)

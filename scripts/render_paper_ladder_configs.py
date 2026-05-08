@@ -23,42 +23,91 @@ class LadderRunSpec:
 
 LADDER_SPECS = (
     LadderRunSpec(
-        slug="joint-main",
-        label="Joint Main",
+        slug="full-ensemble",
+        label="Full Ensemble",
         role="primary",
-        base_config="joint_pool_webface4m_paper_main_defended.json",
+        base_config="arcface_webface4m_paper_full_ensemble.json",
     ),
     LadderRunSpec(
-        slug="joint-clean-baseline",
-        label="Joint Clean Baseline",
+        slug="baseline-clean",
+        label="Baseline Clean",
         role="baseline",
-        base_config="joint_pool_webface4m_paper_clean_baseline.json",
+        base_config="arcface_webface4m_paper_clean_baseline.json",
     ),
     LadderRunSpec(
-        slug="joint-no-transfer",
-        label="Joint No Transfer",
+        slug="recognizer-ensemble-only",
+        label="Recognizer Ensemble Only",
         role="ablation",
-        base_config="joint_pool_webface4m_paper_ablation_no_transfer.json",
+        base_config="arcface_webface4m_paper_recognizer_ensemble_only.json",
     ),
     LadderRunSpec(
-        slug="joint-no-feature",
-        label="Joint No Feature",
+        slug="attack-ensemble-only",
+        label="Attack Ensemble Only",
         role="ablation",
-        base_config="joint_pool_webface4m_paper_ablation_no_feature.json",
+        base_config="arcface_webface4m_paper_attack_ensemble_only.json",
     ),
     LadderRunSpec(
-        slug="joint-no-rotation",
-        label="Joint No Rotation",
+        slug="single-attack-only",
+        label="Single Attack Only",
         role="ablation",
-        base_config="joint_pool_webface4m_paper_ablation_no_rotation.json",
+        base_config="arcface_webface4m_paper_single_attack_only.json",
     ),
     LadderRunSpec(
-        slug="joint_test",
-        label="Joint Test",
+        slug="full-ensemble-test",
+        label="Full Ensemble Test",
         role="integration",
-        base_config="joint_pool_webface4m_test.json",
+        base_config="arcface_webface4m_full_ensemble_test.json",
     ),
 )
+
+
+PAPER_EVAL_ATTACKERS = [
+    {
+        "name": "pgd",
+        "family": "primary_white_box",
+        "kind": "online",
+        "weight": 0.5,
+        "enabled": True,
+        "eps": 0.03137254901960784,
+        "alpha": 0.00392156862745098,
+        "steps": 6,
+        "random_start": True,
+        "restarts": 2,
+        "surrogate_weights": {"target": 1.0},
+        "cache_roots": [],
+        "refresh_every_epochs": None,
+    },
+    {
+        "name": "bpfa",
+        "family": "primary_transfer",
+        "kind": "online",
+        "weight": 0.2,
+        "enabled": True,
+        "eps": 0.03137254901960784,
+        "alpha": 0.00196078431372549,
+        "steps": 8,
+        "random_start": True,
+        "restarts": 2,
+        "surrogate_weights": {"target": 1.0},
+        "cache_roots": [],
+        "refresh_every_epochs": None,
+    },
+    {
+        "name": "dfanet",
+        "family": "primary_feature",
+        "kind": "online",
+        "weight": 0.3,
+        "enabled": True,
+        "eps": 0.03137254901960784,
+        "alpha": 0.00392156862745098,
+        "steps": 6,
+        "random_start": True,
+        "restarts": 2,
+        "surrogate_weights": {"target": 1.0},
+        "cache_roots": [],
+        "refresh_every_epochs": None,
+    },
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -115,14 +164,28 @@ def _render_config(
     data["dataset_fraction"] = float(dataset_fraction)
     data["dataset_subset_seed"] = int(seed)
     data["seed"] = int(seed)
-    data["resume_from"] = data.get("resume_from")
+    data["resume_from"] = None
     data["train_dir"] = str((data_root / "manifests" / "train.jsonl").resolve())
     data["val_dir"] = str((data_root / "manifests" / "val.jsonl").resolve())
+    pairs_root = data_root.parent / "pairs"
+    for pairs_key in ("val_pairs_path", "test_pairs_path"):
+        raw_pairs_path = data.get(pairs_key)
+        if not isinstance(raw_pairs_path, str) or not raw_pairs_path.strip():
+            continue
+        normalized_pairs_path = raw_pairs_path.replace("\\", "/")
+        marker = "/Dataset/pairs/"
+        if marker not in normalized_pairs_path:
+            continue
+        pair_suffix = normalized_pairs_path.split(marker, 1)[1]
+        data[pairs_key] = str((pairs_root / pair_suffix).resolve())
+    data["target_backbone"] = "iresnet100"
     data["batch_size"] = int(batch_size)
-    data["clean_warmup_batch_size"] = 128
-    data["shallow_adv_batch_size"] = 40
-    data["full_adv_batch_size"] = 32
+    data["clean_warmup_batch_size"] = int(data.get("clean_warmup_batch_size") or 128)
+    data["shallow_adv_batch_size"] = int(data.get("shallow_adv_batch_size") or 48)
+    data["full_adv_batch_size"] = int(data.get("full_adv_batch_size") or 32)
     data["attack_chunk_size"] = 32
+    if spec.role != "integration":
+        data["full_robust_eval_every_epochs"] = 8
     data["checkpoint_every"] = 1
     data["gradient_accumulation_steps"] = 1
     data["num_workers"] = int(num_workers)
@@ -135,6 +198,9 @@ def _render_config(
     data["runtime_profile"] = "paper_full" if spec.role != "integration" else "custom"
     data["device"] = "cuda"
     data["output_dir"] = str(output_dir)
+    data["eval_attackers"] = [dict(policy) for policy in PAPER_EVAL_ATTACKERS]
+    if str(data.get("target_model", "")).strip().lower() not in {"joint_pool", "jointpool", "pool"}:
+        data.pop("joint_pool_member_weights", None)
     if str(data.get("target_model", "")).strip().lower() in {"joint_pool", "jointpool", "pool"}:
         data["recognizers_mode"] = "joint_train"
     return data
