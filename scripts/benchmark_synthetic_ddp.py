@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Example: torchrun --standalone --nproc_per_node=1 scripts/benchmark_synthetic_ddp.py --help
 from __future__ import annotations
 
 import argparse

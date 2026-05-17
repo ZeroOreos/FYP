@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Example: python Modifiers/attack/dim/generate.py --help
 # Canonical DiM wrapper entrypoint.
 
 import sys

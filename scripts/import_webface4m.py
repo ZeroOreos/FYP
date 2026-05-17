@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Example: python scripts/import_webface4m.py --help
 from __future__ import annotations
 
 import argparse

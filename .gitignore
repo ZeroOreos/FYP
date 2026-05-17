@@ -8,6 +8,7 @@
 .env
 .env.*
 .venv/
+.venv-*/
 venv/
 ENV/
 env/
@@ -27,6 +28,16 @@ __pycache__/
 htmlcov/
 .ipynb_checkpoints/
 
+# LaTeX/report build intermediates
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+
 # Dataset downloads and generated dataset artifacts
 Dataset/**/raw/
 Dataset/**/manifests/
@@ -36,14 +47,40 @@ Dataset/**/extract_manifest.json
 Dataset/pairs/*.npz
 Dataset/pairs/*.npy
 
-# Server-local runs, exports, logs, and scratch space
-TrainingRuns/
+# Model checkpoints, weights, and generated arrays
+*.ckpt
+*.pth
+*.pt
+*.onnx
+*.safetensors
+*.npz
+*.npy
+
+# Server-local runs, exports, logs, and scratch space.
+# Keep final experiment run records because they are part of the paper evidence.
+TrainingRuns/*
+!TrainingRuns/*/
+!TrainingRuns/*/summary.json
+!TrainingRuns/*/history.json
+!TrainingRuns/*/metrics.jsonl
+!TrainingRuns/*/config.snapshot.json
+!TrainingRuns/*/repro_state.json
+!TrainingRuns/*/posthoc*.json
+!TrainingRuns/*/*.log
+!TrainingRuns/*/checkpoints/
+!TrainingRuns/*/checkpoints/latest.pth
+!TrainingRuns/*/checkpoints/final.pth
+!TrainingRuns/*/checkpoints/best*.pth
 TrainingExports/
-Training/generated/
+Training/generated/*
+!Training/generated/*/
+!Training/generated/**/*.json
 Results/
 runs/
+wandb/
+mlruns/
+lightning_logs/
 tmp/
-*.log
 *.out
 *.err
 *.pid

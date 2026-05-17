@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Example: python scripts/render_paper_ladder_configs.py --help
 from __future__ import annotations
 
 import argparse

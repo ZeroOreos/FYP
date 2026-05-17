@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Example: python scripts/prepare_training_split.py --help
 """Create a small train/val identity split for local training smoke runs."""
 
 from __future__ import annotations

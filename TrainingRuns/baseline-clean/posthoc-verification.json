@@ -1,0 +1,58 @@
+{
+  "checkpoint": "/home/wen/data/runs/baseline-clean/checkpoints/latest.pth",
+  "checkpoint_load": {
+    "loaded_tensors": 925,
+    "partial_load": true,
+    "recognizer_loaded": false,
+    "recognizer_skipped_tensor_names": [],
+    "recognizer_skipped_tensors": 0,
+    "skipped_tensor_names": [
+      "margin.weight"
+    ],
+    "skipped_tensors": 1
+  },
+  "config": "/home/wen/data/FYP/Training/generated/paper_ladder/baseline-clean.json",
+  "device": "cuda",
+  "distributed": true,
+  "eval_batches": 0,
+  "stages": {
+    "robust": {
+      "ok": true,
+      "reason": "skip_robust",
+      "skipped": true
+    },
+    "verification": {
+      "elapsed_s": 73.96055586915463,
+      "ok": true,
+      "result": {
+        "best_accuracy": 0.9995527863502502,
+        "best_threshold": 0.26261812448501587,
+        "eer": 0.0004740979056805372,
+        "far_supported@0.0001": true,
+        "far_supported@0.001": true,
+        "far_supported@0.01": true,
+        "far_supported@1e-05": true,
+        "mean_negative_cosine": 0.002187749370932579,
+        "mean_positive_cosine": 0.648931086063385,
+        "negative_pairs": 204598.0,
+        "pairs": 409196.0,
+        "positive_pairs": 204598.0,
+        "roc_auc": 0.9999909400939941,
+        "tar@far=0.0001": 0.9986363649368286,
+        "tar@far=0.001": 0.9997067451477051,
+        "tar@far=0.01": 0.9999266862869263,
+        "tar@far=1e-05": 0.9964662194252014,
+        "threshold@far=0.0001": 0.29673662781715393,
+        "threshold@far=0.001": 0.23126325011253357,
+        "threshold@far=0.01": 0.17061327397823334,
+        "threshold@far=1e-05": 0.3406083285808563
+      }
+    }
+  },
+  "verification_pairs": {
+    "image_refs": 678391,
+    "pairs": 409196,
+    "shard_refs": 0,
+    "unique_refs": 678391
+  }
+}

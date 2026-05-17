@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Example: python scripts/bootstrap_backends.py --help
 """Audit and lightly prepare backend source, asset, and workdir layout.
 
 This script intentionally does not clone repositories or download weights.

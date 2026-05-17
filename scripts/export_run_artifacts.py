@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Example: python scripts/export_run_artifacts.py --help
 from __future__ import annotations
 
 import argparse

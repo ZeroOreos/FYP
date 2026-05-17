@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Example: python scripts/prepare_webface4m_manifests.py --help
 from __future__ import annotations
 
 import argparse

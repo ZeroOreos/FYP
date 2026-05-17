@@ -1,0 +1,57 @@
+{
+  "generated_at": "2026-04-26T11:52:55",
+  "dataset_fraction": 1.0,
+  "batch_size": 64,
+  "num_workers": 16,
+  "seed": 42,
+  "runs": [
+    {
+      "slug": "full-ensemble",
+      "label": "Full Ensemble",
+      "role": "primary",
+      "base_config": "/Users/jeromeharianto/Documents/School2/FYP/Training/arcface_webface4m_paper_full_ensemble.json",
+      "generated_config": "/Users/jeromeharianto/Documents/School2/FYP/Training/generated/paper_ladder/full-ensemble.json",
+      "output_dir": "/home/wen/data/runs/full-ensemble"
+    },
+    {
+      "slug": "baseline-clean",
+      "label": "Baseline Clean",
+      "role": "baseline",
+      "base_config": "/Users/jeromeharianto/Documents/School2/FYP/Training/arcface_webface4m_paper_clean_baseline.json",
+      "generated_config": "/Users/jeromeharianto/Documents/School2/FYP/Training/generated/paper_ladder/baseline-clean.json",
+      "output_dir": "/home/wen/data/runs/baseline-clean"
+    },
+    {
+      "slug": "recognizer-ensemble-only",
+      "label": "Recognizer Ensemble Only",
+      "role": "ablation",
+      "base_config": "/Users/jeromeharianto/Documents/School2/FYP/Training/arcface_webface4m_paper_recognizer_ensemble_only.json",
+      "generated_config": "/Users/jeromeharianto/Documents/School2/FYP/Training/generated/paper_ladder/recognizer-ensemble-only.json",
+      "output_dir": "/home/wen/data/runs/recognizer-ensemble-only"
+    },
+    {
+      "slug": "attack-ensemble-only",
+      "label": "Attack Ensemble Only",
+      "role": "ablation",
+      "base_config": "/Users/jeromeharianto/Documents/School2/FYP/Training/arcface_webface4m_paper_attack_ensemble_only.json",
+      "generated_config": "/Users/jeromeharianto/Documents/School2/FYP/Training/generated/paper_ladder/attack-ensemble-only.json",
+      "output_dir": "/home/wen/data/runs/attack-ensemble-only"
+    },
+    {
+      "slug": "single-attack-only",
+      "label": "Single Attack Only",
+      "role": "ablation",
+      "base_config": "/Users/jeromeharianto/Documents/School2/FYP/Training/arcface_webface4m_paper_single_attack_only.json",
+      "generated_config": "/Users/jeromeharianto/Documents/School2/FYP/Training/generated/paper_ladder/single-attack-only.json",
+      "output_dir": "/home/wen/data/runs/single-attack-only"
+    },
+    {
+      "slug": "full-ensemble-test",
+      "label": "Full Ensemble Test",
+      "role": "integration",
+      "base_config": "/Users/jeromeharianto/Documents/School2/FYP/Training/arcface_webface4m_full_ensemble_test.json",
+      "generated_config": "/Users/jeromeharianto/Documents/School2/FYP/Training/generated/paper_ladder/full-ensemble-test.json",
+      "output_dir": "/home/wen/data/runs/full-ensemble-test"
+    }
+  ]
+}

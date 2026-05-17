@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Example: python Modifiers/attack/adv_makeup/generate.py --help
 # Canonical Adv-Makeup wrapper entrypoint.
 
 import sys

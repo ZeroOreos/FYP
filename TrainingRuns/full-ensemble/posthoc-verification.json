@@ -1,0 +1,62 @@
+{
+  "checkpoint": "/home/wen/data/runs/full-ensemble/checkpoints/latest.pth",
+  "checkpoint_load": {
+    "loaded_tensors": 925,
+    "partial_load": true,
+    "recognizer_loaded": true,
+    "recognizer_skipped_tensor_names": [
+      "heads.arcface.margin.weight",
+      "heads.cosface.margin.weight",
+      "heads.curricularface.margin.weight"
+    ],
+    "recognizer_skipped_tensors": 3,
+    "skipped_tensor_names": [
+      "margin.weight"
+    ],
+    "skipped_tensors": 1
+  },
+  "config": "/home/wen/data/FYP/Training/generated/paper_ladder/full-ensemble.json",
+  "device": "cuda",
+  "distributed": true,
+  "eval_batches": 0,
+  "stages": {
+    "robust": {
+      "ok": true,
+      "reason": "skip_robust",
+      "skipped": true
+    },
+    "verification": {
+      "elapsed_s": 73.88641826901585,
+      "ok": true,
+      "result": {
+        "best_accuracy": 0.9820868372917175,
+        "best_threshold": 0.20857612788677216,
+        "eer": 0.019286587834358215,
+        "far_supported@0.0001": true,
+        "far_supported@0.001": true,
+        "far_supported@0.01": true,
+        "far_supported@1e-05": true,
+        "mean_negative_cosine": 0.06433336436748505,
+        "mean_positive_cosine": 0.5286693572998047,
+        "negative_pairs": 204598.0,
+        "pairs": 409196.0,
+        "positive_pairs": 204598.0,
+        "roc_auc": 0.9973358511924744,
+        "tar@far=0.0001": 0.8481168150901794,
+        "tar@far=0.001": 0.9349749088287354,
+        "tar@far=0.01": 0.9739879965782166,
+        "tar@far=1e-05": 0.7416005730628967,
+        "threshold@far=0.0001": 0.3503442704677582,
+        "threshold@far=0.001": 0.2739619314670563,
+        "threshold@far=0.01": 0.21281012892723083,
+        "threshold@far=1e-05": 0.41273945569992065
+      }
+    }
+  },
+  "verification_pairs": {
+    "image_refs": 678391,
+    "pairs": 409196,
+    "shard_refs": 0,
+    "unique_refs": 678391
+  }
+}

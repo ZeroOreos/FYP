@@ -1,0 +1,64 @@
+{
+  "python_version": "3.8.10 (default, Mar 18 2025, 20:04:55) \n[GCC 9.4.0]",
+  "executable": "/home/wen/data/FYP/.venv/bin/python3",
+  "platform": "linux",
+  "torch_version": "2.2.2+cu121",
+  "torch_cuda_version": "12.1",
+  "numpy_version": "1.24.4",
+  "torchvision_version": "0.17.2+cu121",
+  "cuda_available": true,
+  "mps_available": false,
+  "cudnn_available": true,
+  "cudnn_version": 8902,
+  "cudnn_benchmark": false,
+  "cudnn_deterministic": false,
+  "cuda_tf32_matmul": false,
+  "cudnn_tf32": true,
+  "cuda_device_count": 8,
+  "cuda_device_names": [
+    "NVIDIA GeForce RTX 4090 D",
+    "NVIDIA GeForce RTX 4090 D",
+    "NVIDIA GeForce RTX 4090 D",
+    "NVIDIA GeForce RTX 4090 D",
+    "NVIDIA GeForce RTX 4090 D",
+    "NVIDIA GeForce RTX 4090 D",
+    "NVIDIA GeForce RTX 4090 D",
+    "NVIDIA GeForce RTX 4090 D"
+  ],
+  "cuda_device_capabilities": [
+    [
+      8,
+      9
+    ],
+    [
+      8,
+      9
+    ],
+    [
+      8,
+      9
+    ],
+    [
+      8,
+      9
+    ],
+    [
+      8,
+      9
+    ],
+    [
+      8,
+      9
+    ],
+    [
+      8,
+      9
+    ],
+    [
+      8,
+      9
+    ]
+  ],
+  "git_commit_error": "Command '['git', 'rev-parse', 'HEAD']' returned non-zero exit status 128.",
+  "pip_freeze_skipped": true
+}

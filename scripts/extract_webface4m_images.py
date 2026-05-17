@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Example: python scripts/extract_webface4m_images.py --help
 from __future__ import annotations
 
 import argparse

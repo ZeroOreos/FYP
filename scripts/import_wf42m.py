@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Example: python scripts/import_wf42m.py --help
 """Prepare a canonical WebFace42M dataset root.
 
 This does not attempt to download WebFace42M. It creates the canonical local target

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Example: python Modifiers/attack/advfacegan/generate.py --help
 # Canonical AdvFaceGAN wrapper entrypoint.
 
 import sys

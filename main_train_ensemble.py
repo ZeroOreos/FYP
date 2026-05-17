@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Example: python main_train_ensemble.py --config Training/generated/paper_ladder/full-ensemble.json
 """Mode B ensemble training entry point.
 
 Primary attackers are generated natively during training.

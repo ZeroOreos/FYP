@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Example: python Modifiers/attack/dim/wrapper.py --help
 
 from __future__ import annotations
 
