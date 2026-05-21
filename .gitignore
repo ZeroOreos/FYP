@@ -47,6 +47,8 @@ Dataset/**/images/
 Dataset/**/extract_manifest.json
 Dataset/pairs/*.npz
 Dataset/pairs/*.npy
+!Dataset/WebFace4M/manifests/
+!Dataset/WebFace4M/manifests/*.json
 
 # Model checkpoints, weights, and generated arrays
 *.ckpt
@@ -56,6 +58,7 @@ Dataset/pairs/*.npy
 *.safetensors
 *.npz
 *.npy
+!Dataset/pairs/WebFace4M_partial_train_pairs.npz
 
 # Server-local runs, exports, logs, and scratch space.
 # Keep final experiment run records because they are part of the paper evidence.
@@ -68,10 +71,6 @@ TrainingRuns/*
 !TrainingRuns/*/repro_state.json
 !TrainingRuns/*/posthoc*.json
 !TrainingRuns/*/*.log
-!TrainingRuns/*/checkpoints/
-!TrainingRuns/*/checkpoints/latest.pth
-!TrainingRuns/*/checkpoints/final.pth
-!TrainingRuns/*/checkpoints/best*.pth
 TrainingExports/
 Training/generated/*
 !Training/generated/*/

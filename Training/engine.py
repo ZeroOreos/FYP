@@ -1286,7 +1286,7 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
             logger.info(f"[INFO] MPS limiter:   {os.environ.get('PYTORCH_MPS_HIGH_WATERMARK_RATIO', 'unset')}")
         _log_cuda_runtime_diagnostics(logger, config=config, device=device)
         logger.info(f"[INFO] Backbone:      {config.target_backbone}")
-        logger.info(f"[INFO] Embedding dim:  {config.embedding_dim} (placeholder under the 512-D ceiling)")
+        logger.info(f"[INFO] Embedding dim:  {config.embedding_dim}")
         logger.info(f"[INFO] Dataset:       {config.dataset_name}")
         logger.info(
             f"[INFO] Data slice:    fraction={config.dataset_fraction} "
@@ -1347,7 +1347,7 @@ def run_training(config: EnsembleTrainingConfig, resume_from: Path | None = None
         if eval_policy is not None:
             logger.info(f"[INFO] Eval attack:   {eval_policy.name}")
         elif config.clean_only or not config.enabled_attackers():
-            logger.info("[INFO] Ensemble:      disabled; running clean placeholder training.")
+            logger.info("[INFO] Ensemble:      disabled; running clean training.")
         if resume_from is not None:
             logger.info(f"[INFO] Resume:        {resume_from}")
             logger.info(f"[INFO] Resume epoch:  {start_epoch}/{config.epochs}")

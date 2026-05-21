@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Example: python main_train_ensemble.py --config Training/generated/paper_ladder/full-ensemble.json
-"""Mode B ensemble training entry point.
+"""Ensemble face-recognition training entry point.
 
 Primary attackers are generated natively during training.
 Surrogate attackers should be materialized into cached dataset roots and referenced in config.
@@ -34,7 +34,7 @@ def _sanitize_cuda_alloc_conf_env() -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run Mode B ensemble face-recognition training.")
+    parser = argparse.ArgumentParser(description="Run ensemble face-recognition training.")
     parser.add_argument("--config", type=Path, default=None, help="Optional JSON config file.")
     parser.add_argument("--resume-from", type=Path, default=None, help="Optional checkpoint to resume from.")
     parser.add_argument("--train-dir", type=Path, default=None, help="Training dataset root.")
@@ -70,9 +70,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ceiling-placeholder",
         action="store_true",
-        help="Use the WF42M / ArcFace published ceiling config while keeping the local placeholder backbone and embedding dim.",
+        help="Use the WF42M / ArcFace ceiling config with the local proxy backbone and embedding dimension.",
     )
-    parser.add_argument("--clean-only", action="store_true", help="Skip ensemble attacks and run clean placeholder training.")
+    parser.add_argument("--clean-only", action="store_true", help="Skip ensemble attacks and run clean training.")
     return parser.parse_args()
 
 

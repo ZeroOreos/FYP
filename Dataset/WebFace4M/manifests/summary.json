@@ -1,0 +1,13 @@
+{
+  "dataset_name": "WebFace4M",
+  "raw_root": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/WebFace4M/raw",
+  "num_shards": 121,
+  "classes": 205990,
+  "total_samples": 4235242,
+  "train_samples": 4015416,
+  "val_samples": 219826,
+  "image_root": "/Users/jeromeharianto/Documents/School2/FYP/Dataset/WebFace4M/images",
+  "val_fraction": 0.02,
+  "min_val_per_class": 1,
+  "max_val_per_class": 5
+}

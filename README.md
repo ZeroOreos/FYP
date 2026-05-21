@@ -6,7 +6,7 @@ Face recognition robustness research focused on multi-recognizer plus multi-atta
 
 - `python3 main_train_ensemble.py --train-dir <train_dir> --val-dir <val_dir> --output-dir <run_dir>`
 
-This repo is now training-first. The old recognition-only and attack-materialization top-level pipelines were removed during the pivot cleanup.
+This repo is training-first. Legacy recognition-only and attack-materialization top-level paths were removed during the final cleanup.
 
 ## Current Scope
 
@@ -20,19 +20,20 @@ This repo is now training-first. The old recognition-only and attack-materializa
 
 ## Layout
 
-- `Dataset/`: clean data and local split outputs
-- `Training/`: ensemble training stack
-- `TrainingRuns/`: server-local checkpoints and run summaries
-- `Modifiers/attack/`: cached heavy-attack wrappers and generators
-- `Backends/`: local envs, upstream sources, and checkpoint assets
+- `Dataset/`: dataset metadata, exact class mapping, and verification-pair metadata
+- `Training/`: training, attack generation, evaluation, and config code
+- `TrainingRuns/`: final experiment summaries, histories, metrics, config snapshots, and posthoc JSONs
+- `Modifiers/attack/`: optional heavy-attack wrappers and generators
+- `Backends/`: upstream-source and asset layout for optional external attack/recognition backends
 - `Utility/`: small shared runtime helpers
-- `notes/`: active project notes
-- `scripts/prepare_training_split.py`: build local train/val splits from an identity-root dataset when needed, but active training should use `WebFace4M` manifests
+- `scripts/`: import, rendering, evaluation, probing, and artifact utilities
+
+Notes, raw datasets, extracted images, local backups, and model checkpoints are intentionally not tracked.
 
 ## Minimal Setup
 
 ```bash
-pip install torch torchvision
+python3.8 -m pip install torch==2.2.2 torchvision==0.17.2
 pip install facenet-pytorch pytorch-lightning "setuptools<81"
 ```
 
@@ -50,7 +51,7 @@ uv sync --extra compile
 
 If Triton is missing, the training code now falls back to eager execution instead of aborting the run.
 
-Retained backend inventory in the refactored layout:
+Backend inventory retained by the layout:
 
 - `Backends/sources/recognition/CosFace_upstream/`
 - `Backends/sources/recognition/CurricularFace_upstream/`
@@ -69,7 +70,7 @@ Surrogate wrappers:
 - `Modifiers/attack/adv_makeup/`
 - `Modifiers/attack/dim/`
 
-For research framing, do not confuse the target model, the recognizer ensemble, and the attacker ensemble.
+The three moving parts are separate:
 
 - target model: the single defended model being optimized
 - recognizer ensemble: auxiliary recognizer heads or models that provide additional training pressure
@@ -127,17 +128,17 @@ sh scripts/bootstrap_cloud_webface4m.sh
 
 That extracts images under `images/`, rebuilds manifests with `image_path` entries, and the current loader will prefer extracted files while still falling back to shard reads when needed.
 
-2. Render a server-local config and launch the serious run:
+2. Render a server-local config and launch the full run:
 
 ```bash
 FYP_WEBFACE4M_ROOT=/shared/fyp/data/WebFace4M \
 FYP_OUTPUT_ROOT=/shared/fyp/runs \
 sh scripts/launch_cloud_train.sh \
   Training/arcface_webface4m_resnet18_cloud_template.json \
-  arcface-r18-server-serious
+  arcface-r18-server-full
 ```
 
-For fast throughput tuning on the same DDP/data path, use a benchmark preset instead of the full serious run.
+For throughput tuning on the same DDP/data path, use a benchmark preset instead of the full run.
 
 The small `resnet18` preset is useful for loader/DDP smoke checks, but if it under-drives the GPUs use the `iresnet100` benchmark preset instead so the compute mix stays closer to the real run:
 
@@ -200,10 +201,10 @@ If you want multi-GPU launch through `torchrun`, set:
 ```bash
 USE_TORCHRUN=1 NPROC_PER_NODE=4 sh scripts/launch_cloud_train.sh \
   Training/arcface_webface4m_resnet18_cloud_template.json \
-  arcface-r18-server-ddp-serious
+  arcface-r18-server-ddp-full
 ```
 
-The default cloud template now matches the repo's 24-epoch serious `ResNet18` schedule instead of the older 12-epoch smoke cadence.
+The default cloud template uses the 24-epoch `ResNet18` schedule instead of the older 12-epoch smoke cadence.
 
 Each run writes directly into the server run directory:
 
@@ -219,11 +220,11 @@ If you still need a compact export later, you can package an existing run manual
 
 ```bash
 python3 scripts/export_run_artifacts.py \
-  --run-dir /shared/fyp/runs/arcface-r18-server-serious \
+  --run-dir /shared/fyp/runs/arcface-r18-server-full \
   --export-root /shared/fyp/exports \
   --bundle
 ```
 
 ## Verified Runs
 
-Local run artifacts are intentionally ignored and should be purged before uploading this repo to a server.
+The committed `TrainingRuns/` files are the final paper evidence bundle. They contain metrics and reproducibility metadata, not checkpoints. Regenerate checkpoints by rerunning the corresponding generated config under `Training/generated/paper_ladder/`.

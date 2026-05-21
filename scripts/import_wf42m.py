@@ -34,7 +34,7 @@ def write_manifest(target_root: Path, source_root: Path | None, linked: bool) ->
         "status": "prepared" if source_root is None else "source_registered",
         "notes": [
             "The published ceiling targets WebFace42M with RetinaFace-style 5-point alignment and 112x112 crops.",
-            "This repo keeps a smaller local placeholder backbone and embedding dim for practical iteration.",
+            "This repo keeps a smaller local proxy backbone and embedding dimension for practical iteration.",
             "Actual WebFace42M contents are not bundled in the repo and must come from a local source prepared separately.",
         ],
     }
@@ -49,8 +49,8 @@ def write_readme(target_root: Path) -> None:
         "# WebFace42M Local Target\n\n"
         "This folder is the canonical adjacent import target for the WF42M ceiling pipeline.\n\n"
         "- Expected published ceiling: RetinaFace-class 5-point alignment, 112x112 normalized crop\n"
-        "- Local repo placeholder: smaller backbone and embedding dim until the full ceiling is practical\n"
-        "- Best local serious alternative under about 20GB: aligned WebFace4M\n"
+        "- Local proxy setting: smaller backbone and embedding dimension until full-scale WF42M is practical\n"
+        "- Practical local alternative under about 20GB: aligned WebFace4M\n"
         "- Put or link a local WF42M identity-root source here via `scripts/import_wf42m.py`\n",
         encoding="utf-8",
     )

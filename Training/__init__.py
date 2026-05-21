@@ -1,2 +1,1 @@
-"""Mode B ensemble training package."""
-
+"""Ensemble face-recognition training package."""
